@@ -26,10 +26,12 @@ import java.awt.Insets;
 import java.awt.Toolkit;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
+import java.awt.event.KeyEvent;
+import java.awt.event.KeyListener;
 import java.util.List;
 import java.util.ArrayList;
 
-public class Simulator implements ActionListener {
+public class Simulator implements ActionListener, KeyListener {
 	private List<World> worlds;
 	private World world;
 
@@ -103,6 +105,17 @@ public class Simulator implements ActionListener {
 		Inspector.getInstance().refresh();
 		Graph.getInstance().refresh();
 	}
+
+	@Override
+	public void keyPressed(KeyEvent e) {
+		
+	}
+
+	@Override
+	public void keyTyped(KeyEvent e) {}
+
+	@Override
+	public void keyReleased(KeyEvent e) {}
 }
 
 // Lists current world and child nodes; allows user to add, select, copy, paste, and delete nodes

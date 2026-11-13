@@ -9,7 +9,11 @@ plugins {
     // Apply the application plugin to add support for building a CLI application in Java.
     application
     java
+    id("com.gradleup.shadow") version "9.6.1"
 }
+
+val appVersion = providers.gradleProperty("appVersion").getOrElse("0.0.0-dev")
+version = appVersion
 
 repositories {
     // Use Maven Central for resolving dependencies.
@@ -29,7 +33,7 @@ dependencies {
 // Apply a specific Java toolchain to ease working on different environments.
 java {
     toolchain {
-        languageVersion = JavaLanguageVersion.of(25)
+        languageVersion = JavaLanguageVersion.of(27)
     }
 }
 
@@ -39,11 +43,21 @@ application {
 }
 
 tasks.jar {
+    archiveFileName.set("bps.jar")
     manifest {
         attributes (
-            "Main-Class" to "net.froglux.App"
+            "Main-Class" to "net.froglux.App",
+            "Implementation-Version" to appVersion
         )
     }
+}
+
+tasks.shadowJar {
+    archiveFileName.set("bps-all.jar")
+}
+
+tasks.named("assemble") {
+    dependsOn(tasks.shadowJar)
 }
 
 tasks.named<Test>("test") {

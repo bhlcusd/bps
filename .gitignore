@@ -6,3 +6,6 @@ build
 
 # Ignore Kotlin plugin data
 .kotlin
+
+# Ignore all .class files
+*.class

@@ -16,6 +16,7 @@ permissions:
 
 env:
   APP_NAME: bps
+  MAIN_JAR: bps-all.jar
   MAIN_CLASS: net.froglux.App
 
 jobs:
@@ -26,12 +27,15 @@ jobs:
         include:
           - os: ubuntu-latest
             platform: linux
+            arch: x64
             installer_type: deb
           - os: windows-latest
             platform: windows
+            arch: x64
             installer_type: msi
           - os: macos-latest
             platform: macos
+            arch: arm64
             installer_type: dmg
     runs-on: ${{ matrix.os }}
     steps:
@@ -46,33 +50,59 @@ jobs:
       
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Resolve Version
+        shell: bash
+        run: |
+          RAW_TAG="${{ github.event.inputs.release_tag || github.ref_name }}"
+          APP_VERSION=$(echo "${RAW_TAG#v}" | cut -d'-' -f1)
+          [[ "$APP_VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]] || {
+            echo "Tag must be vX.Y.Z (got '$RAW_TAG')" >&2; exit 1;
+          }
+
+          echo "APP_VERSION=$APP_VERSION" >> "$GITHUB_ENV"
       
       - name: Build .jar with Gradle
-        run: ./gradlew build
+        shell: bash
+        run: ./gradlew build -PappVersion="$APP_VERSION"
 
       - name: Prepare jpackage Directory
         shell: bash
         run: |
           mkdir -p build/jpackage-input
-          cp build/libs/*[!plain].jar build/jpackage-input
+          cp "app/build/libs/$MAIN_JAR" build/jpackage-input/
       
       - name: Package Native Binary with jpackage
         shell: bash
         run: |
-          MAIN_JAR=$(ls build/jpackage-input/*.jar | head -n 1 | xargs basename)
-
-          RAW_TAG="${{ github.event.inputs.release_tag || github.ref_name }}"
-          APP_VERSION=$(echo "${RAW_TAG#v}" | cut -d'-' -f1)
-
-          jpackage --name "$APP_NAME" --input "build/jpackage-input" --main-jar "$MAIN_JAR" --main-class "$MAIN_CLASS" --type "${{ matrix.installer_type }}" --app-version "$APP_VERSION" --dest "build/dist"
+          rm -rf build/dist
+          jpackage --name "$APP_NAME" --input build/jpackage-input --main-jar "$MAIN_JAR" --main-class "$MAIN_CLASS" --type "${{ matrix.installer_type }}" --app-version "$APP_VERSION" --dest build/dist --license-file LICENSE
       
+      - name: Rename Installers
+        shell: bash
+        run: |
+          shopt -s nullglob
+          files=(build/dist/*)
+          if [ ${#files[@]} -ne 1 ]; then
+            echo "::error::Expected one installer, found ${#files[@]}"
+            ls -l build/dist
+            exit 1
+          fi
+          mv "${files[0]}" "build/dist/${APP_NAME}-${APP_VERSION}-${{ matrix.platform }}-${{ matrix.arch }}.${{ matrix.installer_type }}"
+
+      - name: Configure Standalone JAR
+        if: matrix.platform == 'linux'
+        shell: bash
+        run: |
+          cp "app/build/libs/$MAIN_JAR" "build/dist/${APP_NAME}-${APP_VERSION}.jar"
+          ls -l build/dist
+
       - name: Upload Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: release-assets-${{ matrix.platform }}
-          path: |
-            build/dist/*
-            build/jpackage-input/*.jar
+          name: release-assets-${{ matrix.platform }}-${{ matrix.arch }}
+          path: build/dist/*
+          if-no-files-found: error
       
   publish-release:
     needs: build-binaries
@@ -83,11 +113,13 @@ jobs:
         uses: actions/download-artifact@v4
         with:
           path: artifacts
+          pattern: release-assets-*
           merge-multiple: true
       
       - name: Create Release w/ Changelog
         uses: softprops/action-gh-release@v3
         with:
-          tag-name: ${{ github.event.inputs.release_tag || github.ref_name }}
+          tag_name: ${{ github.event.inputs.release_tag || github.ref_name }}
           files: artifacts/*
+          fail_on_unmatched_files: true
           generate_release_notes: true
