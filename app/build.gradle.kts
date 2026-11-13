@@ -8,6 +8,7 @@
 plugins {
     // Apply the application plugin to add support for building a CLI application in Java.
     application
+    java
 }
 
 repositories {
@@ -34,7 +35,15 @@ java {
 
 application {
     // Define the main class for the application.
-    mainClass = "org.example.App"
+    mainClass = "net.froglux.App"
+}
+
+tasks.jar {
+    manifest {
+        attributes (
+            "Main-Class" to "net.froglux.App"
+        )
+    }
 }
 
 tasks.named<Test>("test") {

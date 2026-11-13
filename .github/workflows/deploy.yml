@@ -1,0 +1,93 @@
+name: Build and Release
+
+on:
+  push:
+    tags:
+      - "v*"
+  workflow_dispatch:
+    inputs:
+      release_tag:
+        description: "Tag name to create/attach release to (use vX.Y.Z format)"
+        required: true
+        type: string
+
+permissions:
+  contents: write
+
+env:
+  APP_NAME: bps
+  MAIN_CLASS: net.froglux.App
+
+jobs:
+  build-binaries:
+    strategy:
+      fail-fast: true
+      matrix:
+        include:
+          - os: ubuntu-latest
+            platform: linux
+            installer_type: deb
+          - os: windows-latest
+            platform: windows
+            installer_type: msi
+          - os: macos-latest
+            platform: macos
+            installer_type: dmg
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Setup JDK
+        uses: actions/setup-java@v6
+        with:
+          java-version: "27"
+          distribution: temurin
+      
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v4
+      
+      - name: Build .jar with Gradle
+        run: ./gradlew build
+
+      - name: Prepare jpackage Directory
+        shell: bash
+        run: |
+          mkdir -p build/jpackage-input
+          cp build/libs/*[!plain].jar build/jpackage-input
+      
+      - name: Package Native Binary with jpackage
+        shell: bash
+        run: |
+          MAIN_JAR=$(ls build/jpackage-input/*.jar | head -n 1 | xargs basename)
+
+          RAW_TAG="${{ github.event.inputs.release_tag || github.ref_name }}"
+          APP_VERSION=$(echo "${RAW_TAG#v}" | cut -d'-' -f1)
+
+          jpackage --name "$APP_NAME" --input "build/jpackage-input" --main-jar "$MAIN_JAR" --main-class "$MAIN_CLASS" --type "${{ matrix.installer_type }}" --app-version "$APP_VERSION" --dest "build/dist"
+      
+      - name: Upload Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-assets-${{ matrix.platform }}
+          path: |
+            build/dist/*
+            build/jpackage-input/*.jar
+      
+  publish-release:
+    needs: build-binaries
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Download Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+          merge-multiple: true
+      
+      - name: Create Release w/ Changelog
+        uses: softprops/action-gh-release@v3
+        with:
+          tag-name: ${{ github.event.inputs.release_tag || github.ref_name }}
+          files: artifacts/*
+          generate_release_notes: true
