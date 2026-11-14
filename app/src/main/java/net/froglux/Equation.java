@@ -8,11 +8,15 @@ package net.froglux;
 
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Stack;
 import java.util.stream.Collectors;
 
+record Point(double x, double y) {}
+
+// TODO: Fix evaluation errors for equation
 public class Equation {
 	public enum IntegrationType {
 		LEFT,
@@ -269,6 +273,27 @@ public class Equation {
 		return rSum(eq, lower, upper, (int) Math.round((upper - lower) / INTEGRATION_DELTA), IntegrationType.MIDPOINT, args);
 	}
 
+	public static double integratePoints(Point... points) {
+		return integratePoints(List.of(points));
+	}
+
+	// Finds the "area under the graph" for the given points using the trapezoidal riemann sum
+	public static double integratePoints(List<Point> points) {
+		if (points == null || points.size() < 2) {
+			return 0;
+		}
+
+		points = new ArrayList<>(points);
+		points.sort((a, b) -> Double.compare(a.x(), b.x()));
+
+		double sum = 0;
+		for (int i = 1; i < points.size(); i++) {
+			sum += (points.get(i).x() - points.get(i - 1).x()) / 2 * (points.get(i - 1).y() + points.get(i).y());
+		}
+
+		return sum;
+	}
+
 	public static boolean isNumber(String val) {
 		if (val == null || val.length() == 0) {
 			return false;
@@ -371,58 +396,51 @@ class MathVariable {
 
 // Represents a "pre-compiled" equation that skips tokenization, enforces stricter rules on function calls, and is reusable
 class MathFunction {
-	private String equation;
 	private String[] tokenized;
-	private MathVariable[] args;
+	private Map<String, MathVariable> args;
+	private String[] required;
 
-	public MathFunction(String equation) {
-		this.equation = equation;
+	// Creates a MathFunction with an equation and args (enforced by name)
+	public MathFunction(String equation, MathVariable... args) {
 		this.tokenized = Equation.tokenize(equation).toArray(String[]::new);
+		this.required = extractRequired(tokenized);
+		this.args = createArgs(args);
 	}
 
-	// Attempt to automatically assign values to required arguments by position
-	public MathVariable[] autoAssign(double... args) {
-		if (args.length < this.args.length) {
-			throw new ArithmeticException(String.format("Expected %d arguments, got %d", this.args.length, args.length));
-		} else {
-			for (int i = 0; i < this.args.length; i++) {
-				this.args[i].set(args[i]);
+	// Creates a MathFunction with an equation and some number of args (not enforced by name)
+	public MathFunction(String equation) {
+		this.tokenized = Equation.tokenize(equation).toArray(String[]::new);
+		this.required = extractRequired(tokenized);
+		this.args = createArgs();
+	}
+
+	// Searches string for variables, irrespective of values (e and pi are automatically injected into args)
+	public String[] extractRequired(String[] tokens) {
+		List<String> list = new ArrayList<>();
+
+		for (String token : tokens) {
+			if (token.matches("[a-zA-Z]+")) {
+				list.add(token);
 			}
 		}
+
+		return list.stream().toArray(String[]::new);
+	}
+
+	// Creates, assigns, and returns a map of MathVariables that include e, pi, and required MathVariables with default values, and fills in values if provided
+	public Map<String, MathVariable> createArgs(MathVariable... args) {
+		this.args = new HashMap<>();
+		this.args.put("pi", new MathVariable("pi", Math.PI));
+		this.args.put("e", new MathVariable("e", Math.E));
+		Arrays.stream(required).forEach(x -> this.args.put(x, new MathVariable(x, 0)));
+
+		if (args == null || args.length == 0) {
+			return this.args;
+		}
+
+		Arrays.stream(args).forEach(x -> this.args.put(x.getName(), x));
 
 		return this.args;
-	}
-
-	public double calculate(double... args) throws ArithmeticException {
-		return calculate(autoAssign(args));
-	}
-
-	public double calculate(MathVariable... args) throws ArithmeticException {
-		if (args.length < this.args.length) {
-			throw new ArithmeticException(String.format("Expected %d arguments, got %d", this.args.length, args.length));
-		} else {
-			// Try to match by name; to make it easier for prototyping, using linear search (to fix use Arrays.binarySearch())
-
-			List<MathVariable> argsRem = Arrays.stream(args).toList();
-			int count = 0;
-
-			for (int i = 0; i < this.args.length; i++) {
-				for (int j = 0; j < argsRem.size(); j++) {
-					if (argsRem.get(j).getName().equals(this.args[i].getName())) {
-						this.args[i].set(argsRem.remove(j).get());
-						count++;
-						break;
-					}
-				}
-			}
-
-			// Auto assign the rest
-			for (int i = count; i < this.args.length; i++) {
-				this.args[i].set(argsRem.get(i).get());
-			}
-		}
-
-		return calculate();
 	}
 
 	// Evaluates the function with the given positional arguments
@@ -436,12 +454,39 @@ class MathFunction {
 			index++;
 		}
 
-		return Equation.calculate(Arrays.stream(tokenized, index + 1, tokenized.length).toArray(String[]::new), args);
+		return Equation.calculate(Arrays.stream(tokenized, index + 1, tokenized.length).toArray(String[]::new), args.values().toArray(MathVariable[]::new));
 	}
 
-	// Convenience method to skip object creation
+	// Uses auto assigned variables, fills by order to order of map
+	public double calculate(double... args) throws ArithmeticException {
+		autoAssign(args);
+		return calculate();
+	}
+
+	// Tries to best assign given variables to map, otherwise defaults to autoAssign()
+	public double calculate(MathVariable... args) throws ArithmeticException {
+		createArgs(args);
+		return calculate();
+	}
+
+	// Attempt to automatically assign values to required arguments by position
+	public Map<String, MathVariable> autoAssign(double... args) {
+		if (args.length < required.length) {
+			throw new ArithmeticException(String.format("Expected %d arguments, got %d", required.length, args.length));
+		} else {
+			var items = this.args.keySet().toArray(String[]::new);
+			
+			for (int i = 0; i < args.length && i < required.length && i < items.length; i++) {
+				this.args.put(items[i], new MathVariable(items[i], args[i]));
+			}
+		}
+
+		return this.args;
+	}
+
+	// Convenience method to skip object creation; relies on auto assigning values
 	public static double eval(String eq, double... args) throws ArithmeticException {
 		MathFunction func = new MathFunction(eq);
-		return func.calculate(func.autoAssign(args));
+		return func.calculate(args);
 	}
 }

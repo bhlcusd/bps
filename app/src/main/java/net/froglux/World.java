@@ -8,10 +8,9 @@ package net.froglux;
 
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Timer;
-import java.util.TimerTask;
-
-// TODO: Rewrite world and node, seperate it from the simulation itself - node and world really should be info classes only and should not have timers or runners involved (info is only fetched from them)
+import java.util.Map;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 // Represents a workplace ("world") where nodes are constrained by the same timer and constants
 class World {
@@ -29,9 +28,8 @@ class World {
 	// Nodes
 	private List<Node> nodes;
 
-	// Timer & Runner - computations happen here
-	private Timer timer;
-	private WorldRunner runner;
+	// Results
+	private List<Result> results;
 	
 	public World(int id, int tick, double start, double end, double gravity) {
 		this.id = id;
@@ -41,13 +39,20 @@ class World {
 		this.gravity = gravity;
 
 		this.nodes = new ArrayList<>();
-		this.timer = new Timer("world-" + id, false);
-		this.runner = new WorldRunner(this);
+		this.results = new ArrayList<>();
 	}
 
-	// This should be called to simulate for the Nodes from start to end and produce node values; calculates the values for each node, creating a Map<Node, Physics>
-	public void run() {
+	// Generates complete values for all nodes for the given time period - each value will have (start - end) / tick values
+	public List<Result> run() {
+		nodes.clear(); // Remove previous results
 
+		try (ExecutorService pool = Executors.newFixedThreadPool(Simulator.SIMULATION_THREADS)) {
+			for (Node node : nodes) {
+				pool.execute(node); // NOTE: node's run() should automatically push to results list
+			}
+		}
+
+		return results;
 	}
 	
 	// When modifying nodes, do not directly modify nodes, use the modifier methods
@@ -80,12 +85,30 @@ class World {
 		return nodes;
 	}
 
-	public WorldRunner getRunner() {
-		return runner;
+	public List<Result> getResults() {
+		return results;
 	}
 	
 	public int getId() {
 		return id;
+	}
+
+	public boolean setStart(double start) {
+		if (start > end) {
+			return false;
+		}
+
+		this.start = start;
+		return true;
+	}
+
+	public boolean setEnd(double end) {
+		if (end < start) {
+			return false;
+		}
+
+		this.end = end;
+		return true;
 	}
 
 	public boolean setTick(int tick) {
@@ -94,8 +117,11 @@ class World {
 		}
 
 		this.tick = tick;
-
 		return true;
+	}
+
+	public int getTick() {
+		return tick;
 	}
 
 	public void setGravity(double gravity) {
@@ -120,29 +146,14 @@ class World {
 	}
 }
 
-// Each world should only have ONE associated WorldRunner (use the World's getRunner()).
-class WorldRunner extends TimerTask {
-	private World world; // Reference to quickly fetch values
-
-	public WorldRunner(World world) {
-		this.world = world;
-	}
-
-	@Override
-	public void run() {
-		
-	}
-
-}
+record Result(Node node, Map<String, List<Double>> results) {}
 
 // A node represents an object affected by the physics of the world it's played in.
-class Node {
+class Node implements Runnable {
 	private int id;
 	private double mass;
 
-	private Equation posEq, velEq, accEq; // Valid equations as defined by Equations class
-
-	private MathVariable pos, vel, acc; // "Current" values of the node at the given world timer
+	private MathFunction posEq, velEq, accEq; // Valid equations as defined by Equations class
 
 	private World world; // Set externally by World object
 	
@@ -156,11 +167,51 @@ class Node {
 		this.world = world;
 	}
 
-	// Called for every tick of World timer, for best performance, consider using a ThreadExecutorPool to stack operations for each time increment,
-	// and then place into a list and sort by time. Or, to reduce memory/processing overhead, allocate arrays and access from there.
-	public void calculate() {
+	// Called by a ThreadExecutorPool thread to calculate the position, velocity, and acceleration for this node
+	public Result calculate() {
+		Result result = new Result(this, null);
+		
 		if (world == null) {
-			return;
+			return result;
 		}
+
+		if (posEq != null) {
+			// Calculate all position points
+			// Calculate dy/dx btwn pos points
+			// Calculate dy/dx btwn vel points
+		} else if (velEq != null) {
+			// Calculate all vel points
+			// Integrate to find pos points
+			// Calculate dy/dx btwn vel points
+		} else if (accEq != null) {
+			// Calculate all acc points
+			// Integrate to find vel points
+			// Integrate to find pos points
+		}
+
+		return result;
+	}
+
+	public int getId() {
+		return id;
+	}
+
+	public boolean setMass(double mass) {
+		if (mass <= 0) {
+			return false;
+		}
+
+		this.mass = mass;
+		return true;
+	}
+
+	public double getMass() {
+		return mass;
+	}
+
+	// Called by parent World's ThreadPoolExecutor and calculates the constants from World to generate (end - start) / tick values
+	@Override
+	public void run() {
+		world.getResults().add(calculate());
 	}
 }

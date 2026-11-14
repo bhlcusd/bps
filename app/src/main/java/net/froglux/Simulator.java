@@ -11,8 +11,9 @@ package net.froglux;
  */
 
 import javax.swing.JFrame;
-import javax.swing.JList;
+import javax.swing.JLayeredPane;
 import javax.swing.JPanel;
+import javax.swing.OverlayLayout;
 import javax.swing.Timer;
 
 import java.awt.Color;
@@ -21,30 +22,34 @@ import java.awt.Graphics;
 import java.awt.Graphics2D;
 import java.awt.GridBagConstraints;
 import java.awt.GridBagLayout;
-import java.awt.GridLayout;
-import java.awt.Insets;
 import java.awt.Toolkit;
 import java.awt.event.ActionEvent;
 import java.awt.event.ActionListener;
 import java.awt.event.KeyEvent;
 import java.awt.event.KeyListener;
-import java.util.List;
+import java.util.Map;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.List;
 
 public class Simulator implements ActionListener, KeyListener {
-	private List<World> worlds;
+	private Map<Integer, World> worlds;
 	private World world;
 
 	private JFrame frame;
+	private JLayeredPane container;
+	private JPanel general;
+	private JPanel modal;
 	private Timer timer;
 
 	private static Simulator instance;
 
 	public static final int TARGET_FRAME_RATE = 60;
+	public static final int SIMULATION_THREADS = 3;
 
 	// Simulator contains references to worlds and acts as the main renderer for the program (relies on Swing components for everything except Graph window)
 	private Simulator() {
-		this.worlds = new ArrayList<>();
+		this.worlds = new HashMap<>();
 		this.world = null;
 
 		var screen = Toolkit.getDefaultToolkit().getScreenSize();
@@ -54,8 +59,12 @@ public class Simulator implements ActionListener, KeyListener {
 		frame.setSize((int) Math.round(screen.getWidth() * 0.75) , (int) Math.round(screen.getHeight() * 0.75));
 		frame.setTitle("bps " + App.VERSION);
 		frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-		frame.setLayout(new GridBagLayout());
 
+		this.container = new JLayeredPane();
+		container.setLayout(new OverlayLayout(container));
+		frame.setContentPane(container);
+
+		this.general = new JPanel(new GridBagLayout());
 		GridBagConstraints gbc = new GridBagConstraints();
 		gbc.fill = GridBagConstraints.BOTH;
 
@@ -64,24 +73,46 @@ public class Simulator implements ActionListener, KeyListener {
 		gbc.weightx = 0.25;
 		gbc.weighty = 0.5;
 		gbc.gridheight = 1;
-		frame.add(Explorer.getInstance(), gbc);
+		general.add(Explorer.getInstance(), gbc);
 
 		gbc.gridx = 0;
 		gbc.gridy = 1;
 		gbc.weightx = 0.25;
 		gbc.weighty = 0.5;
 		gbc.gridheight = 1;
-		frame.add(Inspector.getInstance(), gbc);
+		general.add(Inspector.getInstance(), gbc);
 
 		gbc.gridx = 1;
 		gbc.gridy = 0;
 		gbc.weightx = 0.75;
 		gbc.weighty = 1;
 		gbc.gridheight = 2;
-		frame.add(Graph.getInstance(), gbc);
+		general.add(Graph.getInstance(), gbc);
+
+		general.setAlignmentX(0.5f);
+		general.setAlignmentY(0.5f);
+		container.add(general, JLayeredPane.DEFAULT_LAYER);
+
+		this.modal = new JPanel(new GridBagLayout()) {
+			@Override 
+			public void paintComponent(Graphics g) {
+				Graphics2D g2d = (Graphics2D) g;
+				g2d.setColor(new Color(0, 0, 0, 128));
+				g2d.fillRect(0, 0, getWidth(), getHeight());
+				g2d.dispose();
+				super.paintComponent(g);
+			}
+		};
+		modal.setOpaque(false);
+		modal.setVisible(false);
+		modal.setAlignmentX(0.5f);
+		modal.setAlignmentY(0.5f);
+		container.add(modal, JLayeredPane.MODAL_LAYER);
 
 		frame.setLocationRelativeTo(null);
 		frame.setVisible(true);
+
+		frame.addKeyListener(this);
 
 		this.timer = new Timer((int) Math.round(1000.0 / TARGET_FRAME_RATE), this);
 		timer.start();
@@ -96,7 +127,18 @@ public class Simulator implements ActionListener, KeyListener {
 	}
 
 	public void run() {
-		// TODO: Do something on execution - window should already be created
+		Graph graph = Graph.getInstance();
+
+		graph.setViewport(0, 10, -5, 5, 1, 1);
+		graph.setShowGrid(true);
+		graph.setConnectPoints(true);
+
+		graph.setPoints(
+			new Point(0, 0),
+			new Point(1, 1),
+			new Point(2, -2),
+			new Point(3, 3)
+		);
 	}
 
 	@Override
@@ -106,9 +148,13 @@ public class Simulator implements ActionListener, KeyListener {
 		Graph.getInstance().refresh();
 	}
 
+	// Main keyboard listener
+
 	@Override
 	public void keyPressed(KeyEvent e) {
-		
+		if (e.getKeyChar() == 'c') {
+			this.modal.setVisible(!this.modal.isVisible());
+		}
 	}
 
 	@Override
@@ -116,90 +162,37 @@ public class Simulator implements ActionListener, KeyListener {
 
 	@Override
 	public void keyReleased(KeyEvent e) {}
-}
 
-// Lists current world and child nodes; allows user to add, select, copy, paste, and delete nodes
-class Explorer extends JPanel {
-	private World world;
+	// Getters/setters
 
-	private JList<Node> list;
-
-	private static Explorer instance;
-
-	// TODO: Create a list using JList that lists all objects present in world, clicking on it directs the Inspector to get value
-	private Explorer() {
-		this.setBackground(Color.RED);
-		this.world = null;
+	public void setWorld(World world) {
+		worlds.put(world.getId(), world);
 	}
 
-	public static Explorer getInstance() {
-		if (instance == null) {
-			instance = new Explorer();
-		}
-
-		return instance;
+	public World getWorld() {
+		return world;
 	}
 
-	public void refresh() {
-
-	}
-}
-
-// Lists the properties of a node, provides settings similar to Godot, with a label and an input value (number, string, boolean (checkbox), or dropdown)
-class Inspector extends JPanel {
-	private static Inspector instance;
-
-	// TODO: Create a grid with key: value/input pairs (similar to Godot)
-	private Inspector() {
-		this.setBackground(Color.BLUE);
-		this.setLayout(new GridLayout(0, 2));
+	public void clearWorlds() {
+		worlds.clear();
 	}
 
-	public static Inspector getInstance() {
-		if (instance == null) {
-			instance = new Inspector();
-		}
-
-		return instance;
+	public Map<Integer, World> getWorlds() {
+		return worlds;
 	}
 
-	public void refresh() {
-		
-	}
-}
+	// Misc. methods
 
-// A simple graph that plots points with scalable axis and can conform to varying sizes
-class Graph extends JPanel {
-	// Grid tick distance
-	private int xInc, yInc;
-
-	// Flags
-	private boolean grid;
-
-	private static Graph instance;
-
-	private Graph() {
-		this.setBackground(Color.GREEN);
+	// NOTE: There is one shared modal; any class can replace modal with own config using: modal.removeAll(); modal.revalidate(); modal.repaint();
+	public void showModal() {
+		this.modal.setVisible(true);
 	}
 
-	public static Graph getInstance() {
-		if (instance == null) {
-			instance = new Graph();
-		}
-
-		return instance;
+	public void hideModal() {
+		this.modal.setVisible(false);
 	}
 
-	public void refresh() {
-		
-	}
-
-	// TODO: Draw graph view with lines and plot points by getting processed points from world
-	public void paintComponent(Graphics g) {
-		super.paintComponent(g);
-
-		Graphics2D g2d = (Graphics2D) g;
-
-		
+	public JPanel getModal() {
+		return this.modal;
 	}
 }
