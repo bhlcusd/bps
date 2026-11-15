@@ -374,3 +374,8 @@ record GraphViewport(double minX, double maxX, double minY, double maxY, double 
 		return maxY - minY;
 	}
 }
+
+// Shows buttons for user to click on to play/pause, jump to time
+class Toolbar extends JPanel {
+
+}

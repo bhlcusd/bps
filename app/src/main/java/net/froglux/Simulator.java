@@ -1,5 +1,7 @@
 package net.froglux;
 
+import javax.swing.JComponent;
+
 /*
  * `bps` is a simple physics simulator built on Java and Swing. It relies on a global timer (ticks)
  * that acts as dt. It can simulate both basic (algebraic) and advanced (calculus) physics. Position,
@@ -28,9 +30,7 @@ import java.awt.event.ActionListener;
 import java.awt.event.KeyEvent;
 import java.awt.event.KeyListener;
 import java.util.Map;
-import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.List;
 
 public class Simulator implements ActionListener, KeyListener {
 	private Map<Integer, World> worlds;
@@ -68,26 +68,34 @@ public class Simulator implements ActionListener, KeyListener {
 		GridBagConstraints gbc = new GridBagConstraints();
 		gbc.fill = GridBagConstraints.BOTH;
 
+		Explorer explorer = Explorer.getInstance();
+		Inspector inspector = Inspector.getInstance();
+		Graph graph = Graph.getInstance();
+
+		ignorePreferredSize(explorer);
+		ignorePreferredSize(inspector);
+		ignorePreferredSize(graph);
+
 		gbc.gridx = 0;
 		gbc.gridy = 0;
 		gbc.weightx = 0.25;
 		gbc.weighty = 0.5;
 		gbc.gridheight = 1;
-		general.add(Explorer.getInstance(), gbc);
+		general.add(explorer, gbc);
 
 		gbc.gridx = 0;
 		gbc.gridy = 1;
 		gbc.weightx = 0.25;
 		gbc.weighty = 0.5;
 		gbc.gridheight = 1;
-		general.add(Inspector.getInstance(), gbc);
+		general.add(inspector, gbc);
 
 		gbc.gridx = 1;
 		gbc.gridy = 0;
 		gbc.weightx = 0.75;
 		gbc.weighty = 1;
 		gbc.gridheight = 2;
-		general.add(Graph.getInstance(), gbc);
+		general.add(graph, gbc);
 
 		general.setAlignmentX(0.5f);
 		general.setAlignmentY(0.5f);
@@ -166,7 +174,11 @@ public class Simulator implements ActionListener, KeyListener {
 	// Getters/setters
 
 	public void setWorld(World world) {
-		worlds.put(world.getId(), world);
+		this.world = world;
+		
+		if (world != null) {
+			worlds.put(world.getId(), world);
+		}
 	}
 
 	public World getWorld() {
@@ -177,11 +189,32 @@ public class Simulator implements ActionListener, KeyListener {
 		worlds.clear();
 	}
 
+	public World addWorld(World world) {
+		return worlds.put(world.getId(), world);
+	}
+
+	public void removeWorld(World world) {
+		if (world == null) {
+			return;
+		}
+
+		worlds.remove(world.getId());
+
+		if (this.world == world) {
+			this.world = null;
+		}
+	}
+
 	public Map<Integer, World> getWorlds() {
 		return worlds;
 	}
 
 	// Misc. methods
+
+	private static void ignorePreferredSize(JComponent comp) {
+		comp.setPreferredSize(new Dimension(0, 0));
+		comp.setMinimumSize(new Dimension(0, 0));
+	}
 
 	// NOTE: There is one shared modal; any class can replace modal with own config using: modal.removeAll(); modal.revalidate(); modal.repaint();
 	public void showModal() {

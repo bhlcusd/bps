@@ -12,12 +12,22 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Stack;
+import java.util.function.DoubleBinaryOperator;
+import java.util.function.DoubleUnaryOperator;
 import java.util.stream.Collectors;
 
 record Point(double x, double y) {}
 
 // TODO: Fix evaluation errors for equation
+// TODO: Eventually allow MathVariable[] to be passed into differentiate() and integrate() - also change calculate() to return the same function
+// TODO: Use BiFunction for above todo
 public class Equation {
+	public enum DifferentiationType {
+		LOWER,
+		UPPER,
+		MIDDLE
+	}
+
 	public enum IntegrationType {
 		LEFT,
 		MIDPOINT,
@@ -25,17 +35,17 @@ public class Equation {
 		TRAPEZOIDAL
 	}
 
-	// The name property of MathVariable to interpret as equivalent to the x-axis
-	public static String xName = "t";
+	// Delta x for differentiation
+	public static double DIFFERENTIATION_DELTA = 1e-5;
 
 	// Distance between each riemann sum (dx)
-	public static double INTEGRATION_DELTA = 0.01;
+	public static double INTEGRATION_DELTA = 1e-2;
+	public static double INTEGRATION_SEGMENTS = 1 / INTEGRATION_DELTA;
 
 	// Implementation derived from SimpleCalc
 	public static List<String> tokenize(String eq) {
 		List<String> tokens = new ArrayList<>();
 
-		String lastToken = "";
 		int index = 0;
 
 		while (index < eq.length()) {
@@ -45,27 +55,8 @@ public class Equation {
 			String token = "";
 
 			if (curr == '+' || curr == '-') {
-				// Handle unary operator
-				if (lastToken.length() == 0 || (isSyntax(lastToken) && !lastToken.equals(")"))) {
-					token += curr;
-
-					if (Character.isDigit(eq.charAt(index))) {
-						while (index < eq.length() && (Character.isDigit(eq.charAt(index)) || eq.charAt(index) == '.')) {
-							token += eq.charAt(index);
-							index++;
-						}
-					} else {
-						while (index < eq.length() && Character.isLetter(eq.charAt(index))) {
-							token += eq.charAt(index);
-							index++;
-						}
-					}
-					
-					tokens.add(token);
-				} else { // Add as normal operator
-					token += curr;
-					tokens.add(token);
-				}
+				token += curr;
+				tokens.add(token);
 			} else if (Character.isDigit(curr) || curr == '.') {
 				token += curr;
 
@@ -88,11 +79,6 @@ public class Equation {
 				token += curr;
 				tokens.add(token);
 			}
-
-			// Only add non-whitespace as valid prev token
-			if (token.strip().length() > 0) {
-				lastToken = token;
-			}
 		}
 
 		return tokens;
@@ -102,62 +88,120 @@ public class Equation {
 	public static double calculate(String[] tokens, MathVariable... args) throws ArithmeticException {
 		Stack<Double> valueStack = new Stack<>();
 		Stack<String> operatorStack = new Stack<>();
+
+		boolean expectOperand = true;
+
+		// Ignore left side
+		int start = 0;
+		for (int i = 0; i < tokens.length; i++) {
+			if (tokens[i].equals("=")) {
+				start = i + 1;
+			}
+		}
 		
-		for (String token : tokens) {
+		for (int i = start; i < tokens.length; i++) {
+			String token = tokens[i];
+
 			if (isNumber(token)) {
 				valueStack.push(Double.parseDouble(token));
+				expectOperand = false;
 			} else if (!isSyntax(token)) { // Catch variables
 				boolean substitute = false;
 
 				// Iterate until variable that matches token is found
 				for (MathVariable variable : args) {
-					// No need to check repeating names
 					if (variable.getName().equals(token)) {
 						valueStack.push(variable.get());
 						substitute = true;
+						break;
 					}
 				}
 
 				// Use 0 for undefined variables
 				if (!substitute) {
-					valueStack.push(0.0);
+					throw new ArithmeticException("calculate: Undefined variable: " + token);
 				}
+
+				expectOperand = false;
 			} else if (token.equals("(")) {
 				operatorStack.push(token);
+				expectOperand = true;
 			} else if (token.equals(")")) { // Solve value in parenthesis
 				// Calculate until "(" is reached
-				while (!operatorStack.peek().equals("(")) {
+				while (!operatorStack.isEmpty() && !operatorStack.peek().equals("(")) {
 					compute(valueStack, operatorStack);
 				}
 					
-				// Pop "(" since it's not needed
-				if (!operatorStack.isEmpty()) {
-					operatorStack.pop();
+				if (operatorStack.isEmpty()) {
+					throw new ArithmeticException("calculate: Mismatched ')'");
 				}
+
+				// Pop ")"
+				operatorStack.pop();
+				expectOperand = false;
 			} else {
-				// Until precedent is lower or no more operations left; Solve before adding low precedence operator 
+				// A +/- is a unary operator
+				if (expectOperand) {
+					if (token.equals("+")) {
+						continue;
+					}
+
+					if (token.equals("-")) {
+						operatorStack.push("u-");
+						continue;
+					}
+
+					throw new ArithmeticException("calculate: Unexpected operator: " + token);
+				}
+
+				// Parse until lower precedent or no operators left
 				while (!operatorStack.isEmpty() && !operatorStack.peek().equals("(") && !hasPrecedence(operatorStack.peek(), token)) {
 					compute(valueStack, operatorStack);
 				}
-					
-				// Push the current operator onto the stack
+
 				operatorStack.push(token);
+				expectOperand = true;
 			}
 		}
 		
 		// Calculate to collapse stack
 		while (!operatorStack.isEmpty()) {
+			if (operatorStack.peek().equals("(")) {
+				throw new ArithmeticException("calculate: Mismatched '('");
+			}
+
 			compute(valueStack, operatorStack);
 		}
 		
 		// Return the last value (result) in the stack
-		return valueStack.isEmpty() ? 0 : valueStack.pop();
+		if (valueStack.isEmpty()) {
+			return 0;
+		}
+
+		if (valueStack.size() != 1) {
+			throw new ArithmeticException("calculate: invalid expression");
+		}
+
+		return valueStack.pop();
 	}
 
 	private static void compute(Stack<Double> valueStack, Stack<String> operatorStack) {
+		String operator = operatorStack.pop();
+		if (operator.equals("u-")) {
+			if (valueStack.isEmpty()) {
+				throw new ArithmeticException("computer: missing operand for unary '-'");
+			}
+
+			valueStack.push(-valueStack.pop());
+			return;
+		}
+
+		if (valueStack.size() < 2) {
+			throw new ArithmeticException("compute: missing operand for '" + operator + "'");
+		}
+
 		double valRight = valueStack.pop();
 		double valLeft = valueStack.pop();
-		String operator = operatorStack.pop();
 						
 		valueStack.push(compute(valLeft, operator, valRight));
 	}
@@ -193,35 +237,53 @@ public class Equation {
 
 	private static boolean hasPrecedence(String op1, String op2) {
 		if (op2.equals("(") || op2.equals(")")) {
-			 return false;
+			return false;
 		}
 
-		int weight1 = 0;
-		if (op1.equals("+") || op1.equals("-")) {
-			weight1 = 1;
-		}
-		if (op1.equals("*") || op1.equals("/") || op1.equals("%")) {
-			weight1 = 2;
-		}
-		if (op1.equals("^")) {
-			weight1 = 3;
+		if (op1.equals("^") && op2.equals("^")) {
+			return true;
 		}
 
-		int weight2 = 0;
-		if (op2.equals("+") || op2.equals("-")) {
-			weight2 = 1;
-		}
-		if (op2.equals("*") || op2.equals("/") || op2.equals("%")) {
-			weight2 = 2;
-		}
-		if (op2.equals("^")) {
-			weight2 = 3;
-		}
-
-		return weight1 < weight2;
+		return getOperatorWeight(op1) < getOperatorWeight(op2);
 	}
 
-	public static double rSum(String eq, double lower, double upper, int segs, IntegrationType type, MathVariable... args) {
+	private static int getOperatorWeight(String op) {
+		return switch (op) {
+			case "+", "-" -> 1;
+			case "*", "/", "%" -> 2;
+			case "u-" -> 3;
+			case "^" -> 4;
+			default -> 0;
+		};
+	}
+
+	// Returns the differentiation by substituting into the h -> 0 method; respective = variable to take derivative respective to
+	public static double differentiate(String eq, double val, String respective, MathVariable... args) {
+		return differentiate(eq, respective, args).applyAsDouble(val);
+	} 
+
+	// Returns the differentiation using the h -> 0 method; respective = variable to take derivative respective to
+	public static DoubleUnaryOperator differentiate(String eq, String respective, MathVariable... args) {
+		return val -> {
+			String[] tokens = Equation.tokenize(eq).toArray(String[]::new);
+			Map<String, MathVariable> argsMap = getArgsMap(args);
+
+			argsMap.put(respective, new MathVariable(respective, val + DIFFERENTIATION_DELTA));
+			double upper = Equation.calculate(tokens, argsMap.values().toArray(MathVariable[]::new));
+
+			argsMap.put(respective, new MathVariable(respective, val - DIFFERENTIATION_DELTA));
+			double lower = Equation.calculate(tokens, argsMap.values().toArray(MathVariable[]::new));
+
+			return (upper - lower) / (2 * DIFFERENTIATION_DELTA);
+		};
+	}
+
+	// Evaluates a definite integral using the given Riemann Sum type
+	public static double rSum(String eq, double lower, double upper, int segs, String respective, IntegrationType type, MathVariable... args) {
+		if (segs < 1) {
+			throw new ArithmeticException("rSum: segs < 1");
+		}
+
 		Map<String, MathVariable> argsMap = getArgsMap(args);
 
 		// Calculates the values at each segments' endpoints (+ 1 since there is an extra endpoint to account for)
@@ -230,11 +292,10 @@ public class Equation {
 
 		String[] tokenized = Equation.tokenize(eq).toArray(String[]::new);
 
-		// TODO: Eventually make this more efficient; consider adding a new calculate() method that accepts a map of [name], [MathVariable]
 		// Calculates the y-value for each segment
 		double[] valSegs = new double[segs + 1];
 		for (int i = 0; i < valSegs.length; i++) {
-			argsMap.put("x", new MathVariable("x", refX));
+			argsMap.put(respective, new MathVariable(respective, refX));
 			valSegs[i] = Equation.calculate(tokenized, argsMap.entrySet().stream().map(x -> x.getValue()).toArray(MathVariable[]::new));
 			refX += delta;
 		}
@@ -249,8 +310,9 @@ public class Equation {
 				break;
 			case MIDPOINT:
 				for (int i = 1; i < valSegs.length; i++) {
-					double avg = (valSegs[i - 1] + valSegs[i]) / 2;
-					sum += delta * avg;
+					double mid = lower + (i + 0.5) * delta;
+					argsMap.put(respective, new MathVariable(respective, mid));
+					sum += delta * Equation.calculate(tokenized, argsMap.values().toArray(MathVariable[]::new));
 				}
 				break;
 			case RIGHT:
@@ -268,11 +330,50 @@ public class Equation {
 		return sum;
 	}
 
-	// Returns the result of the definite integral with dx = INTEGRATION_DELTA. Currently uses trapezoidal riemann sums, but should be analyzed to use the most efficient method
-	public static double integrate(String eq, double lower, double upper, MathVariable... args) {
-		return rSum(eq, lower, upper, (int) Math.round((upper - lower) / INTEGRATION_DELTA), IntegrationType.MIDPOINT, args);
+	// Returns the result of the definite integral with dx = INTEGRATION_DELTA. Currently uses midpoint riemann sums, but should be analyzed to use the most efficient method
+	public static double rSum(String eq, double lower, double upper, String respective, MathVariable... args) {
+		if (lower == upper) {
+			return 0;
+		}
+
+		int segs = (int) Math.round(Math.abs(upper - lower) / INTEGRATION_DELTA);
+		return rSum(eq, lower, upper, Math.max(1, segs), respective, IntegrationType.MIDPOINT, args);
 	}
 
+	public static double integrate(String eq, String respective, double lower, double upper, MathVariable... args) {
+		return integrate(eq, respective, args).applyAsDouble(lower, upper);
+	}
+
+	// Returns a DoubleBinaryOperator that accepts (lower, upper) bounds - uses Simpson's Rule; respective - string of variable in equation to calculate relative to (use t for time and x for general)
+	public static DoubleBinaryOperator integrate(String eq, String respective, MathVariable... args) {
+		INTEGRATION_SEGMENTS = 1 / INTEGRATION_DELTA;
+		return (lower, upper) -> {
+			String[] tokens = Equation.tokenize(eq).toArray(String[]::new);
+			Map<String, MathVariable> argsMap = getArgsMap(args);
+
+			int segs = Math.max(2, (int) Math.round(INTEGRATION_SEGMENTS));
+			if (segs % 2 != 0) {
+				segs++;
+			}
+			double h = (upper - lower) / segs;
+			argsMap.put(respective, new MathVariable(respective, lower));
+			double sum = Equation.calculate(tokens, argsMap.values().toArray(MathVariable[]::new));
+
+			for (int i = 1; i < segs; i++) {
+				argsMap.put(respective, new MathVariable(respective, lower + i * h));
+
+				double val = Equation.calculate(tokens, argsMap.values().toArray(MathVariable[]::new));
+				sum += (i % 2 == 0 ? 2 : 4) * val;
+			}
+
+			argsMap.put(respective, new MathVariable(respective, upper));
+			sum += Equation.calculate(tokens, argsMap.values().toArray(MathVariable[]::new));
+
+			return sum * h / 3;
+		};
+	}
+
+	// Simplified methods that accepts multiple point arguments
 	public static double integratePoints(Point... points) {
 		return integratePoints(List.of(points));
 	}
@@ -322,7 +423,11 @@ public class Equation {
 	}
 
 	public static Map<String, MathVariable> getArgsMap(MathVariable... args) {
-		return Arrays.stream(args).collect(Collectors.toMap(x -> x.getName(), x -> x));
+		if (args == null) {
+			return new HashMap<>();
+		}
+
+		return Arrays.stream(args).collect(Collectors.toMap(x -> x.getName(), x -> x, (a, b) -> b));
 	}
 
 	// Checks whether the current string is an operator. An operator is defined as being able to transform two numeric or numeric-like values and returns a result.
@@ -396,19 +501,30 @@ class MathVariable {
 
 // Represents a "pre-compiled" equation that skips tokenization, enforces stricter rules on function calls, and is reusable
 class MathFunction {
+	// Derived from user input
+	private String equation;
 	private String[] tokenized;
 	private Map<String, MathVariable> args;
 	private String[] required;
+	private String respective;
+
+	// Stored functions (none for integral since it needs to sum up areas)
+	private DoubleUnaryOperator derivative;
+	private DoubleBinaryOperator integral;
 
 	// Creates a MathFunction with an equation and args (enforced by name)
-	public MathFunction(String equation, MathVariable... args) {
+	public MathFunction(String equation, String respective, MathVariable... args) {
+		this.equation = equation;
+		this.respective = respective;
 		this.tokenized = Equation.tokenize(equation).toArray(String[]::new);
 		this.required = extractRequired(tokenized);
 		this.args = createArgs(args);
 	}
 
 	// Creates a MathFunction with an equation and some number of args (not enforced by name)
-	public MathFunction(String equation) {
+	public MathFunction(String equation, String respective) {
+		this.equation = equation;
+		this.respective = respective;
 		this.tokenized = Equation.tokenize(equation).toArray(String[]::new);
 		this.required = extractRequired(tokenized);
 		this.args = createArgs();
@@ -417,14 +533,22 @@ class MathFunction {
 	// Searches string for variables, irrespective of values (e and pi are automatically injected into args)
 	public String[] extractRequired(String[] tokens) {
 		List<String> list = new ArrayList<>();
+		int start = 0;
+		for (int i = 0; i < tokens.length; i++) {
+			if (tokens[i].equals("=")) {
+				start = i + 1;
+			}
+		}
 
-		for (String token : tokens) {
-			if (token.matches("[a-zA-Z]+")) {
+		for (int i = start; i < tokens.length; i++) {
+			String token = tokens[i];
+
+			if (token.matches("[a-zA-Z]+") && !token.equals("pi") && !token.equals("e") && !list.contains(token)) {
 				list.add(token);
 			}
 		}
 
-		return list.stream().toArray(String[]::new);
+		return list.toArray(String[]::new);
 	}
 
 	// Creates, assigns, and returns a map of MathVariables that include e, pi, and required MathVariables with default values, and fills in values if provided
@@ -432,29 +556,30 @@ class MathFunction {
 		this.args = new HashMap<>();
 		this.args.put("pi", new MathVariable("pi", Math.PI));
 		this.args.put("e", new MathVariable("e", Math.E));
-		Arrays.stream(required).forEach(x -> this.args.put(x, new MathVariable(x, 0)));
 
-		if (args == null || args.length == 0) {
-			return this.args;
+		for (String name : required) {
+			this.args.putIfAbsent(name, new MathVariable(name, 0));
 		}
 
-		Arrays.stream(args).forEach(x -> this.args.put(x.getName(), x));
+		if (args != null) {
+			Arrays.stream(args).forEach(x -> this.args.put(x.getName(), x));
+		}
 
+		refreshFunctions();
 		return this.args;
+	}
+
+	private void refreshFunctions() {
+		MathVariable[] currArgs = this.args.values().toArray(MathVariable[]::new);
+		this.derivative = Equation.differentiate(equation, respective, currArgs);
+		this.integral = Equation.integrate(equation, respective, currArgs);
 	}
 
 	// Evaluates the function with the given positional arguments
 	// NOTE: All arguments for MathFunction are positional, it does not depend on the name of each variable
 	// NOTE: This function assumes that args is valid
 	private double calculate() throws ArithmeticException {
-		// Ignore everything before the "=" sign
-		int index = 0;
-
-		while (!tokenized[index].equals("=")) {
-			index++;
-		}
-
-		return Equation.calculate(Arrays.stream(tokenized, index + 1, tokenized.length).toArray(String[]::new), args.values().toArray(MathVariable[]::new));
+		return Equation.calculate(tokenized, args.values().toArray(MathVariable[]::new));
 	}
 
 	// Uses auto assigned variables, fills by order to order of map
@@ -469,24 +594,37 @@ class MathFunction {
 		return calculate();
 	}
 
+	// Finds the derivative of the function at the point using 
+	public double derivative(double val) {
+		return derivative.applyAsDouble(val);
+	}
+
+	// Finds the integration of the function using Simpson's Rule
+	public double integrate(double lower, double upper) {
+		return integral.applyAsDouble(lower, upper);
+	}
+
 	// Attempt to automatically assign values to required arguments by position
 	public Map<String, MathVariable> autoAssign(double... args) {
 		if (args.length < required.length) {
 			throw new ArithmeticException(String.format("Expected %d arguments, got %d", required.length, args.length));
-		} else {
-			var items = this.args.keySet().toArray(String[]::new);
-			
-			for (int i = 0; i < args.length && i < required.length && i < items.length; i++) {
-				this.args.put(items[i], new MathVariable(items[i], args[i]));
-			}
 		}
 
+		for (int i = 0; i < required.length; i++) {
+			this.args.put(required[i], new MathVariable(required[i], args[i]));
+		}
+
+		refreshFunctions();
 		return this.args;
+	}
+
+	public String getEquation() {
+		return equation;
 	}
 
 	// Convenience method to skip object creation; relies on auto assigning values
 	public static double eval(String eq, double... args) throws ArithmeticException {
-		MathFunction func = new MathFunction(eq);
+		MathFunction func = new MathFunction(eq, "x");
 		return func.calculate(args);
 	}
 }

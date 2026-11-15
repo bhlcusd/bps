@@ -11,7 +11,7 @@
 
 ## Quick Start
 * Using JAR (Recommended):
-	1. Download your favorite JRE (Java Runtime Environment) or JDK (Java Development Kit); I recommend the [official builds](https://jdk.java.net/) or through a package manager like [brew](https://formulae.brew.sh/formula/openjdk).
+	1. Download your favorite JRE (Java Runtime Environment) or JDK (Java Development Kit); use the [official builds](https://jdk.java.net/) or use a package manager like [brew](https://formulae.brew.sh/formula/openjdk).
 	2. Download the latest `.jar` file from [Releases](https://github.com/bhlcusd/bps/releases/latest).
 	3. Open up the terminal and navigate to where the `.jar` is located.
 	4. Execute: `java -jar bps-[version].jar`. Replace `[version]` with the file's version.
