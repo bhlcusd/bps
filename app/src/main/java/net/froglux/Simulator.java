@@ -17,7 +17,6 @@ import javax.swing.JLayeredPane;
 import javax.swing.JPanel;
 import javax.swing.OverlayLayout;
 import javax.swing.Timer;
-import javax.swing.border.Border;
 
 import java.awt.BorderLayout;
 import java.awt.Color;

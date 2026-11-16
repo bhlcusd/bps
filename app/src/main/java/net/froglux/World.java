@@ -25,6 +25,8 @@ class World {
 	public static final double DEFAULT_END = 10;
 	public static final double DEFAULT_GRAVITY = -9.81;
 	public static final double DEFAULT_MASS = 1;
+	public static final double DEFAULT_Y_MIN = -10;
+	public static final double DEFAULT_Y_MAX = 10;
 
 	// Identifier to search and sort by 
 	private int id;
@@ -36,6 +38,10 @@ class World {
 
 	// World variables
 	private double time;
+
+	// Graph view
+	private double yMin, yMax;
+	private boolean autoFit;
 
 	// Nodes
 	private List<Node> nodes;
@@ -53,6 +59,10 @@ class World {
 		this.end = end;
 		this.gravity = gravity;
 		this.revision = 0;
+
+		this.yMin = DEFAULT_Y_MIN;
+		this.yMax = DEFAULT_Y_MAX;
+		this.autoFit = true;
 
 		this.nodes = new ArrayList<>();
 		this.results = new ArrayList<>();
@@ -121,6 +131,16 @@ class World {
 	public List<Result> getResults() {
 		return results;
 	}
+
+	public Result getResult(Node node) {
+		for (Result result : results) {
+			if (result.node() == node) {
+				return result;
+			}
+		}
+
+		return null;
+	}
 	
 	public int getId() {
 		return id;
@@ -177,6 +197,33 @@ class World {
 		return gravity;
 	}
 
+	public boolean setYRange(double yMin, double yMax) {
+		if (!Double.isFinite(yMin) || !Double.isFinite(yMax) || yMin >= yMax) {
+			return false;
+		}
+
+		this.yMin = yMin;
+		this.yMax = yMax;
+		this.autoFit = false;
+		return true;
+	}
+
+	public double getYMin() {
+		return yMin;
+	}
+
+	public double getYMax() {
+		return yMax;
+	}
+
+	public boolean isAutoFit() {
+		return autoFit;
+	}
+
+	public void setAutoFit(boolean autoFit) {
+		this.autoFit = autoFit;
+	}
+
 	public boolean setTime(double time) {
 		if (time < start || time > end) {
 			return false;
@@ -217,6 +264,53 @@ record Result(Node node, Map<String, List<Double>> results, List<Double> times) 
 			case VELOCITY -> results.getOrDefault("v", List.of());
 			case ACCELERATION -> results.getOrDefault("a", List.of());
 		};
+	}
+
+	public double valueAt(String key, double time) {
+		List<Double> values = results.get(key);
+
+		if (values == null || values.isEmpty() || times.isEmpty() || !Double.isFinite(time)) {
+			return Double.NaN;
+		}
+
+		int size = Math.min(values.size(), times.size());
+		if (size == 0) {
+			return Double.NaN;
+		}
+
+		if (time <= times.get(0)) {
+			return values.get(0);
+		}
+
+		if (time >= times.get(size - 1)) {
+			return values.get(size - 1);
+		}
+
+		int lo = 0;
+		int hi = size - 1;
+
+		while (lo <= hi) {
+			int mid = (lo + hi) >>> 1;
+			if (times.get(mid) < time) {
+				lo = mid + 1;
+			} else {
+				hi = mid - 1;
+			}
+		}
+
+		int right = lo;
+		int left = right - 1;
+		double t0 = times.get(left);
+		double t1 = times.get(right);
+		double v0 = values.get(left);
+		double v1 = values.get(right);
+
+		if (t1 == t0) {
+			return v1;
+		}
+
+		double ratio = (time - t0) / (t1 - t0);
+		return v0 + ratio * (v1 - v0);
 	}
 }
 

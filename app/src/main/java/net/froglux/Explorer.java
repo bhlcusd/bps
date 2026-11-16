@@ -4,7 +4,6 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
-import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.GridLayout;
 import java.awt.Rectangle;
@@ -19,7 +18,6 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import java.util.concurrent.Flow;
 import java.util.function.DoublePredicate;
 import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
@@ -52,7 +50,6 @@ public class Explorer extends JPanel {
 
 	private static Explorer instance;
 
-	// TODO: Create a list using JList that lists all objects present in world, clicking on it directs the Inspector to get value; top bar includes space to add child to currently selected item (world when no world selected, or node when world/node selected)
 	private Explorer() {
 		setLayout(new BorderLayout());
 
@@ -349,8 +346,20 @@ class Inspector extends JPanel {
 			world.setGravity(val);
 			return true;
 		});
+		addNumber("y min", world::getYMin, val -> setYRange(world, val, world.getYMax()));
+		addNumber("y max", world::getYMax, val -> setYRange(world, world.getYMin(), val));
+		addReadOnly("auto focus", () -> world.isAutoFit() ? "on" : "manual");
 		addReadOnly("time", () -> format(world.getTime()));
 		addReadOnly("nodes", () -> String.valueOf(world.getNodes().size()));
+	}
+
+	private static boolean setYRange(World world, double min, double max) {
+		if (!world.setYRange(min, max)) {
+			return false;
+		}
+
+		Graph.getInstance().setYRange(world.getYMin(), world.getYMax());
+		return true;
 	}
 
 	private void buildNode(Node node) {
@@ -360,9 +369,9 @@ class Inspector extends JPanel {
 		addNumber("mass", node::getMass, node::setMass);
 		addType(node);
 		addEquation(node);
-		addReadOnly("x", () -> format(node.getPos()));
-		addReadOnly("v", () -> format(node.getVel()));
-		addReadOnly("a", () -> format(node.getAcc()));
+		addReadOnly("x", () -> format(valueAt(node, "x")));
+		addReadOnly("v", () -> format(valueAt(node, "v")));
+		addReadOnly("a", () -> format(valueAt(node, "a")));
 	}
 
 	private void addColor(Node node) {
@@ -466,15 +475,37 @@ class Inspector extends JPanel {
 	private void updateLiveValues() {
 		if (target instanceof World world) {
 			setLive("id", String.valueOf(world.getId()));
+			setLive("auto focus", world.isAutoFit() ? "on" : "manual");
 			setLive("time", format(world.getTime()));
 			setLive("nodes", String.valueOf(world.getNodes().size()));
 		} else if (target instanceof Node node) {
 			setLive("id", String.valueOf(node.getId()));
 			setLive("world", node.getWorld() == null ? "none" : "#" + node.getWorld().getId());
-			setLive("x", format(node.getPos()));
-			setLive("v", format(node.getVel()));
-			setLive("a", format(node.getAcc()));
+			setLive("x", format(valueAt(node, "x")));
+			setLive("v", format(valueAt(node, "v")));
+			setLive("a", format(valueAt(node, "a")));
 		}
+	}
+
+	private static double valueAt(Node node, String key) {
+		World world = node.getWorld();
+
+		if (world != null) {
+			Result result = world.getResult(node);
+			if (result != null) {
+				double value = result.valueAt(key, world.getTime());
+				if (Double.isFinite(value)) {
+					return value;
+				}
+			}
+		}
+
+		return switch (key) {
+			case "x" -> node.getPos();
+			case "v" -> node.getVel();
+			case "a" -> node.getAcc();
+			default -> Double.NaN;
+		};
 	}
 
 	private void setLive(String name, String val) {

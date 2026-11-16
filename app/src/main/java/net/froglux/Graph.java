@@ -236,7 +236,7 @@ public class Graph extends JPanel {
 
 		for (GraphSeries s : series) {
 			double val = s.valueAt(playheadTime);
-			if (!Double.isFinite(val) || val < viewport.minX() || val > viewport.maxX()) {
+			if (!Double.isFinite(val) || val < viewport.minY() || val > viewport.maxY()) {
 				continue;
 			}
 
@@ -370,6 +370,14 @@ public class Graph extends JPanel {
 
 	public void setRange(double minX, double maxX, double minY, double maxY) {
 		setViewport(viewport.withRange(minX, maxX, minY, maxY));
+	}
+
+	public void setYRange(double minY, double maxY) {
+		if (!Double.isFinite(minY) || !Double.isFinite(maxY) || minY >= maxY) {
+			throw new IllegalArgumentException("Graph: invalid y range");
+		}
+
+		setViewport(viewport.minX(), viewport.maxX(), minY, maxY, viewport.xTick(), niceTick(maxY - minY));
 	}
 
 	public void setTicks(double xTick, double yTick) {
@@ -603,6 +611,7 @@ class Toolbar extends JPanel {
 
 	private final JButton runButton;
 	private final JButton playButton;
+	private final JButton focusButton;
 	private final Timeline timeline;
 	private final JLabel statusLabel;
 	private final Timer playbackTimer;
@@ -628,6 +637,10 @@ class Toolbar extends JPanel {
 		this.playButton = new JButton("Play");
 		playButton.setEnabled(false);
 
+		this.focusButton = new JButton("Focus");
+		focusButton.setEnabled(false);
+		focusButton.setToolTipText("Fit graph and re-enable automatic focus");
+
 		this.timeline = new Timeline();
 
 		this.statusLabel = new JLabel("No world");
@@ -637,12 +650,17 @@ class Toolbar extends JPanel {
 		controls.add(runButton);
 		controls.add(playButton);
 
+		JPanel info = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
+		info.add(statusLabel);
+		info.add(focusButton);
+
 		add(controls, BorderLayout.WEST);
 		add(timeline, BorderLayout.CENTER);
-		add(statusLabel, BorderLayout.EAST);
+		add(info, BorderLayout.EAST);
 
 		runButton.addActionListener(e -> run());
 		playButton.addActionListener(e -> togglePlayback());
+		focusButton.addActionListener(e -> focus());
 		timeline.setListener(this::seek);
 
 		this.playbackTimer = new Timer(PLAYBACK_DELAY_MS, e -> tick());
@@ -789,7 +807,12 @@ class Toolbar extends JPanel {
 		} else {
 			graph.setSeries(plotted);
 			graph.setConnectPoints(true);
-			graph.autoFit();
+
+			if (target.isAutoFit()) {
+				graph.autoFit();
+			} else {
+				graph.setYRange(target.getYMin(), target.getYMax());
+			}
 
 			playhead = start;
 			applyPlayhead();
@@ -857,6 +880,10 @@ class Toolbar extends JPanel {
 		Graph.getInstance().clearSeries();
 		Graph.getInstance().clearPlayhead();
 
+		if (current != null && !current.isAutoFit()) {
+			Graph.getInstance().setYRange(current.getYMin(), current.getYMax());
+		}
+
 		timeline.setRange(0, 1);
 		timeline.setTime(0);
 		timeline.setEnabled(false);
@@ -888,8 +915,19 @@ class Toolbar extends JPanel {
 		boolean validRange = world != null && world.getEnd() > world.getStart();
 
 		runButton.setEnabled(hasNodes && state != State.RUNNING);
+		focusButton.setEnabled(world != null && state != State.RUNNING);
 		timeline.setEnabled(current && validRange);
 		playButton.setEnabled(current && validRange);
+	}
+
+	private void focus() {
+		World current = Simulator.getInstance().getWorld();
+
+		if (current != null) {
+			current.setAutoFit(true);
+		}
+
+		Graph.getInstance().autoFit();
 	}
 
 	private void togglePlayback() {
