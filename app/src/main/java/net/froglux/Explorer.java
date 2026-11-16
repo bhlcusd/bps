@@ -435,8 +435,6 @@ class Inspector extends JPanel {
 	}
 
 	private void addReadOnly(String name, Supplier<String> value) {
-		// JLabel label = new JLabel(value.get());
-		// label.setForeground(new Color(64, 64, 64));
 		JTextField field = new JTextField(value.get());
 		field.setEditable(false);
 		liveValues.put(name, field);

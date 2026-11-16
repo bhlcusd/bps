@@ -820,7 +820,7 @@ class Toolbar extends JPanel {
 		this.homeButton = new JButton("Home");
 		homeButton.setToolTipText("Normalizes axis to the default view");
 
-		this.timeline = new Timeline();
+		this.timeline = Timeline.getInstance();
 
 		this.statusLabel = new JLabel("No world");
 		statusLabel.setPreferredSize(new Dimension(STATUS_WIDTH, 20));
@@ -1314,7 +1314,9 @@ class Timeline extends JComponent {
 	private double time = 0;
 	private Consumer<Double> listener = t -> {};
 
-	Timeline() {
+	private static Timeline instance;
+
+	private Timeline() {
 		setPreferredSize(new Dimension(320, 36));
 		setMinimumSize(new Dimension(120, 30));
 		setOpaque(false);
@@ -1334,6 +1336,14 @@ class Timeline extends JComponent {
 
 		addMouseListener(mouse);
 		addMouseMotionListener(mouse);
+	}
+
+	public static Timeline getInstance() {
+		if (instance == null) {
+			instance = new Timeline();
+		}
+
+		return instance;
 	}
 
 	public void setListener(Consumer<Double> listener) {
