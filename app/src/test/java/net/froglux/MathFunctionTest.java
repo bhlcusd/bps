@@ -86,6 +86,14 @@ public class MathFunctionTest {
 	}
 
 	@Test
+	void calculatesSecondDerivative() {
+		MathFunction function = new MathFunction("(x - 3)^2", "x");
+
+		assertEquals(2, function.secondDerivative(4), TOLERANCE);
+		assertEquals(2, function.secondDerivative(2), TOLERANCE);
+	}
+
+	@Test
 	void supportsEquationAssignments() {
 		MathFunction function = new MathFunction("y = x^2", "x");
 

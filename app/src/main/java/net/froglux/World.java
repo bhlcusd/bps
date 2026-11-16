@@ -429,14 +429,10 @@ class Node implements Callable<Result> {
 					positions.add(pos);
 				}
 
-				// Calculate dy/dx btwn pos points
-				for (double x : positions) {
-					velocities.add(equation.derivative(x));
-				}
-
-				// Calculate dy/dx btwn vel points
-				for (double v : velocities) {
-					accelerations.add(equation.derivative(v));
+				// Calculate dx/dt and d^2x/dt^2 at each time
+				for (double t : times) {
+					velocities.add(equation.derivative(t));
+					accelerations.add(equation.secondDerivative(t));
 				}
 			}
 			case VELOCITY -> {
@@ -451,9 +447,9 @@ class Node implements Callable<Result> {
 					positions.add(equation.integrate(world.getStart(), t));
 				}
 
-				// Calculate dy/dx btwn vel points
-				for (double v : velocities) {
-					accelerations.add(equation.derivative(v));
+				// Calculate dv/dt at each time
+				for (double t : times) {
+					accelerations.add(equation.derivative(t));
 				}
 			}
 			case ACCELERATION -> {

@@ -596,6 +596,11 @@ class MathFunction {
 		return derivative.applyAsDouble(val);
 	}
 
+	// Finds the second derivative of the function at the point
+	public double secondDerivative(double val) {
+		return (derivative.applyAsDouble(val + Equation.DIFFERENTIATION_DELTA) - derivative.applyAsDouble(val - Equation.DIFFERENTIATION_DELTA)) / (2 * Equation.DIFFERENTIATION_DELTA);
+	}
+
 	// Finds the integration of the function using Simpson's Rule
 	public double integrate(double lower, double upper) {
 		return integral.applyAsDouble(lower, upper);

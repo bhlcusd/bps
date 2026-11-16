@@ -60,6 +60,37 @@ public class WorldTest {
 	}
 
 	@Test
+	void positionEquationDerivesVelocityAndAccelerationWithRespectToTime() {
+		World world = new World(1, 1, 0, 5, -9.81);
+		Node node = new Node(1, 1);
+		node.setEquation(new MathFunction("(t - 3)^2", "t"), Node.FunctionType.POSITION);
+		world.addNode(node);
+		world.run();
+
+		Result result = world.getResult(node);
+
+		assertEquals(1, result.valueAt("x", 4), 1e-6);
+		assertEquals(2, result.valueAt("v", 4), 1e-6);
+		assertEquals(2, result.valueAt("a", 4), 1e-5);
+		assertEquals(2, result.valueAt("a", 2), 1e-5);
+	}
+
+	@Test
+	void velocityEquationDerivesAccelerationWithRespectToTime() {
+		World world = new World(1, 1, 0, 5, -9.81);
+		Node node = new Node(1, 1);
+		node.setEquation(new MathFunction("t^2", "t"), Node.FunctionType.VELOCITY);
+		world.addNode(node);
+		world.run();
+
+		Result result = world.getResult(node);
+
+		assertEquals(16, result.valueAt("v", 4), 1e-6);
+		assertEquals(8, result.valueAt("a", 4), 1e-6);
+		assertEquals(64.0 / 3, result.valueAt("x", 4), 1e-4);
+	}
+
+	@Test
 	void scrollModeDefaultsToSystemWithoutChangingRevision() {
 		World world = new World(1, 0.01, 0, 10, -9.81);
 		int revision = world.getRevision();
