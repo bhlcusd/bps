@@ -17,7 +17,9 @@ import javax.swing.JLayeredPane;
 import javax.swing.JPanel;
 import javax.swing.OverlayLayout;
 import javax.swing.Timer;
+import javax.swing.border.Border;
 
+import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Dimension;
 import java.awt.Graphics;
@@ -70,11 +72,16 @@ public class Simulator implements ActionListener, KeyListener {
 
 		Explorer explorer = Explorer.getInstance();
 		Inspector inspector = Inspector.getInstance();
+		Toolbar toolbar = Toolbar.getInstance();
 		Graph graph = Graph.getInstance();
+
+		JPanel main = new JPanel(new BorderLayout());
+		main.add(toolbar, BorderLayout.NORTH);
+		main.add(graph, BorderLayout.CENTER);
 
 		ignorePreferredSize(explorer);
 		ignorePreferredSize(inspector);
-		ignorePreferredSize(graph);
+		ignorePreferredSize(main);
 
 		gbc.gridx = 0;
 		gbc.gridy = 0;
@@ -95,7 +102,7 @@ public class Simulator implements ActionListener, KeyListener {
 		gbc.weightx = 0.75;
 		gbc.weighty = 1;
 		gbc.gridheight = 2;
-		general.add(graph, gbc);
+		general.add(main, gbc);
 
 		general.setAlignmentX(0.5f);
 		general.setAlignmentY(0.5f);
@@ -140,19 +147,15 @@ public class Simulator implements ActionListener, KeyListener {
 		graph.setViewport(0, 10, -5, 5, 1, 1);
 		graph.setShowGrid(true);
 		graph.setConnectPoints(true);
-
-		graph.setPoints(
-			new Point(0, 0),
-			new Point(1, 1),
-			new Point(2, -2),
-			new Point(3, 3)
-		);
+		graph.clearSeries();
+		graph.clearPlayhead();
 	}
 
 	@Override
 	public void actionPerformed(ActionEvent e) {
 		Explorer.getInstance().refresh();
 		Inspector.getInstance().refresh();
+		Toolbar.getInstance().refresh();
 		Graph.getInstance().refresh();
 	}
 

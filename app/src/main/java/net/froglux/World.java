@@ -1,5 +1,7 @@
 package net.froglux;
 
+import java.awt.Color;
+
 /*
  * This file contains all classes related to storing info about Nodes and Worlds.
  * 
@@ -10,8 +12,11 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.concurrent.Callable;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.Future;
 
 // Represents a workplace ("world") where nodes are constrained by the same timer and constants
 class World {
@@ -37,6 +42,9 @@ class World {
 
 	// Results
 	private List<Result> results;
+
+	// Revision tracker
+	private int revision;
 	
 	public World(int id, double tick, double start, double end, double gravity) {
 		this.id = id;
@@ -44,28 +52,44 @@ class World {
 		this.start = start;
 		this.end = end;
 		this.gravity = gravity;
+		this.revision = 0;
 
 		this.nodes = new ArrayList<>();
 		this.results = new ArrayList<>();
 	}
 
 	// Generates complete values for all nodes for the given time period - each value will have (start - end) / tick values
-	public List<Result> run() {
-		results.clear(); // Remove previous results
+	public Report run() {
+		List<Node> snapshot = List.copyOf(nodes);
+		List<Result> results = new ArrayList<>(snapshot.size());
+		List<String> errors = new ArrayList<>();
 
 		try (ExecutorService pool = Executors.newFixedThreadPool(Simulator.SIMULATION_THREADS)) {
-			for (Node node : nodes) {
-				pool.execute(node); // NOTE: node's run() should automatically push to results list
+			List<Future<Result>> futures = snapshot.stream()
+				.map(pool::submit)
+				.toList();
+			
+			for (int i = 0; i < futures.size(); i++) {
+				try {
+					results.add(futures.get(i).get());
+				} catch (ExecutionException e) {
+					errors.add("Node #" + snapshot.get(i).getId() + ": " + e.getCause().getMessage());
+				} catch (InterruptedException e) {
+					Thread.currentThread().interrupt();
+					break;
+				}
 			}
 		}
 
-		return results;
+		this.results = results;
+		return new Report(results, errors);
 	}
 	
 	// When modifying nodes, do not directly modify nodes, use the modifier methods
 	public void addNode(Node node) {
 		node.setWorld(this);
 		nodes.add(node);
+		touch();
 	}
 
 	public boolean removeNode(Node node) {
@@ -86,6 +110,7 @@ class World {
 			return false;
 		}
 
+		touch();
 		return true;
 	}
 
@@ -107,6 +132,7 @@ class World {
 		}
 
 		this.start = start;
+		touch();
 		return true;
 	}
 
@@ -120,6 +146,7 @@ class World {
 		}
 
 		this.end = end;
+		touch();
 		return true;
 	}
 
@@ -133,6 +160,7 @@ class World {
 		}
 
 		this.tick = tick;
+		touch();
 		return true;
 	}
 
@@ -142,6 +170,7 @@ class World {
 
 	public void setGravity(double gravity) {
 		this.gravity = gravity;
+		touch();
 	}
 
 	public double getGravity() {
@@ -160,23 +189,67 @@ class World {
 	public double getTime() {
 		return time;
 	}
+
+	public int getRevision() {
+		return revision;
+	}
+
+	public void touch() {
+		revision++;
+	}
 }
 
-record Result(Node node, Map<String, List<Double>> results, List<Double> times) {}
+record Report(List<Result> results, List<String> errors) {
+	public Report {
+		results = List.copyOf(results);
+		errors = List.copyOf(errors);
+	}
+}
+
+record Result(Node node, Map<String, List<Double>> results, List<Double> times) {
+	public List<Double> valuesFor(Node.FunctionType type) {
+		if (type == null) {
+			return List.of();
+		}
+
+		return switch (type) {
+			case POSITION -> results.getOrDefault("x", List.of());
+			case VELOCITY -> results.getOrDefault("v", List.of());
+			case ACCELERATION -> results.getOrDefault("a", List.of());
+		};
+	}
+}
 
 // A node represents an object affected by the physics of the world it's played in.
-class Node implements Runnable {
+class Node implements Callable<Result> {
 	enum FunctionType {
 		POSITION,
 		VELOCITY,
 		ACCELERATION
 	}
 
+	private static final Color[] PALETTE = {
+		Color.BLACK,
+		Color.BLUE,
+		Color.CYAN,
+		Color.DARK_GRAY,
+		Color.GRAY,
+		Color.GREEN,
+		Color.LIGHT_GRAY,
+		Color.MAGENTA,
+		Color.ORANGE,
+		Color.PINK,
+		Color.RED,
+		Color.WHITE,
+		Color.YELLOW
+	};
+
 	private int id;
 	private double mass;
 	private double pos;
 	private double vel;
 	private double acc;
+	private Color color;
 
 	private MathFunction equation; // Valid equation of specific FunctionType
 	private FunctionType type;
@@ -189,6 +262,7 @@ class Node implements Runnable {
 		this.pos = 0;
 		this.vel = 0;
 		this.acc = 0;
+		this.color = PALETTE[id % PALETTE.length];
 		this.world = null;
 	}
 
@@ -200,94 +274,75 @@ class Node implements Runnable {
 			return result;
 		}
 
+		List<Double> times = buildTimes();
+		result.times().addAll(times);
+
+		List<Double> positions = new ArrayList<>();
+		List<Double> velocities = new ArrayList<>();
+		List<Double> accelerations = new ArrayList<>();
+
 		switch (type) {
 			case POSITION -> {
 				// Calculate all position points
-				List<Double> positions = new ArrayList<>();
-				for (double i = world.getStart(); i < world.getEnd(); i += world.getTick()) {
-					pos = equation.calculate(getVariables(i));
+				for (double t : times) {
+					pos = equation.calculate(getVariables(t));
 					positions.add(pos);
-					result.times().add(i);
-				}
-
-				// Evaluate for end point
-				if (!result.times().contains(world.getEnd())) {
-					pos = equation.calculate(getVariables(world.getEnd()));
-					positions.add(pos);
-					result.times().add(world.getEnd());
 				}
 
 				// Calculate dy/dx btwn pos points
-				List<Double> velocities = new ArrayList<>();
 				for (double x : positions) {
 					velocities.add(equation.derivative(x));
 				}
 
 				// Calculate dy/dx btwn vel points
-				List<Double> accelerations = new ArrayList<>();
 				for (double v : velocities) {
 					accelerations.add(equation.derivative(v));
 				}
-
-				// Add to result
-				var map = result.results();
-				map.put("x", positions);
-				map.put("v", velocities);
-				map.put("a", accelerations);
 			}
 			case VELOCITY -> {
 				// Calculate all vel points
-				List<Double> velocities = new ArrayList<>();
-				for (double i = world.getStart(); i < world.getEnd(); i += world.getTick()) {
-					vel = equation.calculate(getVariables(i));
+				for (double t : times) {
+					vel = equation.calculate(getVariables(t));
 					velocities.add(vel);
-					result.times().add(i);
 				}
 
 				// Integrate to find pos points
-				List<Double> positions = new ArrayList<>();
-				for (double t : result.times()) {
+				for (double t : times) {
 					positions.add(equation.integrate(world.getStart(), t));
 				}
 
 				// Calculate dy/dx btwn vel points
-				List<Double> accelerations = new ArrayList<>();
 				for (double v : velocities) {
 					accelerations.add(equation.derivative(v));
 				}
-
-				var map = result.results();
-				map.put("x", positions);
-				map.put("v", velocities);
-				map.put("a", accelerations);
 			}
 			case ACCELERATION -> {
 				// Calculate all acc points
-				List<Double> accelerations = new ArrayList<>();
-				for (double i = world.getStart(); i < world.getEnd(); i += world.getTick()) {
-					acc = equation.calculate(getVariables(i));
+				for (double t : times) {
+					acc = equation.calculate(getVariables(t));
 					accelerations.add(acc);
-					result.times().add(i);
 				}
 
 				// Integrate to find vel points
-				List<Double> velocities = new ArrayList<>();
-				for (double t : result.times()) {
+				for (double t : times) {
 					velocities.add(equation.integrate(world.getStart(), t));
 				}
 
 				// Integrate to find pos points
-				List<Double> positions = new ArrayList<>();
-				for (int i = 0; i < velocities.size(); i++) {
-					positions.add(Equation.integratePoints(velocities.subList(0, i).toArray(Point[]::new)));
+				double x = 0;
+				positions.add(x);
+				for (int i = 1; i < times.size(); i++) {
+					x += (times.get(i) - times.get(i - 1)) * (velocities.get(i - 1) + velocities.get(i)) / 2.0;
+					positions.add(x);
 				}
-
-				var map = result.results();
-				map.put("x", positions);
-				map.put("v", velocities);
-				map.put("a", accelerations);
 			}
 		}
+
+		// Add to result
+		var map = result.results();
+		map.put("x", positions);
+		map.put("v", velocities);
+		map.put("a", accelerations);
 
 		return result;
 	}
@@ -301,6 +356,19 @@ class Node implements Runnable {
 			new MathVariable("v", vel),
 			new MathVariable("a", acc)
 		};
+	}
+
+	public List<Double> buildTimes() {
+		List<Double> times = new ArrayList<>();
+		for (double t = world.getStart(); t < world.getEnd(); t += world.getTick()) {
+			times.add(t);
+		}
+
+		if (times.isEmpty() || Double.compare(times.get(times.size() - 1), world.getEnd()) != 0) {
+			times.add(world.getEnd());
+		}
+
+		return times;
 	}
 
 	public int getId() {
@@ -321,6 +389,7 @@ class Node implements Runnable {
 		}
 
 		this.mass = mass;
+		changed();
 		return true;
 	}
 
@@ -340,14 +409,27 @@ class Node implements Runnable {
 		return acc;
 	}
 
+	public Color getColor() {
+		return color;
+	}
+
+	public void setColor(Color color) {
+		if (color != null) {
+			this.color = color;
+			changed();
+		}
+	}
+
 	public void setEquation(MathFunction equation, FunctionType type) {
 		this.equation = equation;
 		this.type = type;
+		changed();
 	} 
 
 	public void setEquation(String eq, String respective, FunctionType type) {
 		this.equation = new MathFunction(eq, respective);
 		this.type = type;
+		changed();
 	}
 
 	public MathFunction getEquation() {
@@ -358,9 +440,14 @@ class Node implements Runnable {
 		return type;
 	}
 
-	// Called by parent World's ThreadPoolExecutor and calculates the constants from World to generate (end - start) / tick values
+	private void changed() {
+		if (world != null) {
+			world.touch();
+		}
+	}
+
 	@Override
-	public void run() {
-		world.getResults().add(calculate());
+	public Result call() throws Exception {
+		return calculate();
 	}
 }

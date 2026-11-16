@@ -4,6 +4,7 @@ import java.awt.BorderLayout;
 import java.awt.Color;
 import java.awt.Component;
 import java.awt.Dimension;
+import java.awt.FlowLayout;
 import java.awt.Font;
 import java.awt.GridLayout;
 import java.awt.Rectangle;
@@ -18,6 +19,7 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.concurrent.Flow;
 import java.util.function.DoublePredicate;
 import java.util.function.DoubleSupplier;
 import java.util.function.Supplier;
@@ -62,7 +64,7 @@ public class Explorer extends JPanel {
 		this.addButton = new JButton("Add World");
 		this.deleteButton = new JButton("Delete");
 		this.deleteButton.setEnabled(false);
-		this.targetLabel = new JLabel("No World Selected");
+		this.targetLabel = new JLabel("No World Selected", SwingConstants.CENTER);
 
 		addButton.addActionListener(e -> add());
 		deleteButton.addActionListener(e -> delete());
@@ -205,7 +207,7 @@ public class Explorer extends JPanel {
 			.orElse(0) + 1;
 		
 		Node node = new Node(id, World.DEFAULT_MASS);
-		node.setEquation(node.getEquation(), Node.FunctionType.POSITION);
+		node.setEquation(new MathFunction("0", "t"), Node.FunctionType.POSITION);
 		parent.addNode(node);
 
 		refresh();
@@ -268,7 +270,8 @@ class Inspector extends JPanel {
 	private static final DecimalFormat NUMBER_FORMAT = createDecimalFormat();
 
 	private final JPanel form;
-	private final Map<String, JLabel> liveValues;
+	private final Map<String, JComponent> liveValues;
+	private final JLabel label;
 
 	private Object target;
 	private boolean built;
@@ -282,6 +285,11 @@ class Inspector extends JPanel {
 		form.setBorder(BorderFactory.createEmptyBorder(4, 4, 4, 4));
 		this.liveValues = new HashMap<>();
 
+		JPanel header = new JPanel();
+		this.label = new JLabel("Inspector", SwingConstants.CENTER);
+		header.add(this.label);
+
+		add(header, BorderLayout.NORTH);
 		add(new JScrollPane(form), BorderLayout.CENTER);
 	}
 
@@ -318,12 +326,14 @@ class Inspector extends JPanel {
 		form.removeAll();
 		liveValues.clear();
 
+		label.setText("Inspector");
+
 		if (target instanceof World world) {
 			buildWorld(world);
 		} else if (target instanceof Node node) {
 			buildNode(node);
 		} else {
-			form.add(new JLabel("Select a World or Node"));
+			label.setText("Select a World or Node");
 		}
 
 		form.revalidate();
@@ -345,13 +355,27 @@ class Inspector extends JPanel {
 
 	private void buildNode(Node node) {
 		addReadOnly("id", () -> String.valueOf(node.getId()));
-		addReadOnly("world", () -> node.getWorld() == null ? "none" : "#" + node.getWorld().getId());
+		addReadOnly("world id", () -> node.getWorld() == null ? "none" : String.valueOf(node.getWorld().getId()));
+		addColor(node);
 		addNumber("mass", node::getMass, node::setMass);
 		addType(node);
 		addEquation(node);
 		addReadOnly("x", () -> format(node.getPos()));
 		addReadOnly("v", () -> format(node.getVel()));
 		addReadOnly("a", () -> format(node.getAcc()));
+	}
+
+	private void addColor(Node node) {
+		JPanel swatch = new JPanel();
+		swatch.setBackground(node.getColor());
+		swatch.setBorder(BorderFactory.createLineBorder(new Color(0, 0, 0)));
+		swatch.setToolTipText(String.format("#%06X", node.getColor().getRGB() & 0xFFFFFF));
+
+		JPanel holder = new JPanel(new BorderLayout());
+		holder.setOpaque(false);
+		holder.add(swatch, BorderLayout.CENTER);
+
+		addRow("color", holder);
 	}
 
 	private void addNumber(String name, DoubleSupplier getter, DoublePredicate setter) {
@@ -379,10 +403,12 @@ class Inspector extends JPanel {
 	}
 
 	private void addReadOnly(String name, Supplier<String> value) {
-		JLabel label = new JLabel(value.get());
-		label.setForeground(new Color(64, 64, 64));
-		liveValues.put(name, label);
-		addRow(name, label);
+		// JLabel label = new JLabel(value.get());
+		// label.setForeground(new Color(64, 64, 64));
+		JTextField field = new JTextField(value.get());
+		field.setEditable(false);
+		liveValues.put(name, field);
+		addRow(name, field);
 	}
 
 	private void addType(Node node) {
@@ -452,9 +478,16 @@ class Inspector extends JPanel {
 	}
 
 	private void setLive(String name, String val) {
-		JLabel label = liveValues.get(name);
-		if (label != null && !val.equals(label.getText())) {
+		JComponent comp = liveValues.get(name);
+
+		if (comp == null) {
+			return;
+		}
+
+		if (comp instanceof JLabel label && !val.equals(label.getText())) {
 			label.setText(val);
+		} else if (comp instanceof JTextField field && !val.equals(field.getText())) {
+			field.setText(val);
 		}
 	}
 
