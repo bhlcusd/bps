@@ -14,6 +14,8 @@ import java.awt.event.KeyEvent;
 import java.text.DecimalFormat;
 import java.text.DecimalFormatSymbols;
 import java.util.ArrayList;
+import java.util.Collection;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
@@ -31,7 +33,9 @@ import javax.swing.JComboBox;
 import javax.swing.JComponent;
 import javax.swing.JLabel;
 import javax.swing.JList;
+import javax.swing.JMenuItem;
 import javax.swing.JPanel;
+import javax.swing.JPopupMenu;
 import javax.swing.JScrollPane;
 import javax.swing.JTextField;
 import javax.swing.KeyStroke;
@@ -40,13 +44,16 @@ import javax.swing.Scrollable;
 import javax.swing.SwingConstants;
 import javax.swing.border.Border;
 
-// Lists current world and child nodes; allows user to add, select, copy, paste, and delete nodes
+// Lists all worlds and their child nodes; allows user to add, select, and delete worlds and nodes
 public class Explorer extends JPanel {
 	private final DefaultListModel<Object> model;
 	private final JList<Object> list;
 	private final JButton addButton;
 	private final JButton deleteButton;
 	private final JLabel targetLabel;
+	private final JPopupMenu addMenu;
+	private final JMenuItem addWorldItem;
+	private final JMenuItem addNodeItem;
 
 	private static Explorer instance;
 
@@ -58,13 +65,37 @@ public class Explorer extends JPanel {
 		list.setSelectionMode(ListSelectionModel.SINGLE_SELECTION);
 		list.setCellRenderer(new ExplorerRenderer());
 
-		this.addButton = new JButton("Add World");
+		this.addButton = new JButton("Add");
 		this.deleteButton = new JButton("Delete");
 		this.deleteButton.setEnabled(false);
 		this.targetLabel = new JLabel("No World Selected", SwingConstants.CENTER);
 
-		addButton.addActionListener(e -> add());
+		this.addMenu = new JPopupMenu();
+		this.addWorldItem = new JMenuItem("World");
+		this.addNodeItem = new JMenuItem("Node");
+		addMenu.add(addWorldItem);
+		addMenu.add(addNodeItem);
+
+		addButton.addActionListener(e -> {
+			updateAddMenu();
+			addMenu.show(addButton, 0, addButton.getHeight());
+		});
+		addWorldItem.addActionListener(e -> addWorld());
+		addNodeItem.addActionListener(e -> addNode());
 		deleteButton.addActionListener(e -> delete());
+
+		list.addListSelectionListener(e -> {
+			if (e.getValueIsAdjusting()) {
+				return;
+			}
+
+			World world = parentWorld(list.getSelectedValue());
+			if (world != null) {
+				Simulator.getInstance().setWorld(world);
+			}
+
+			updateToolbar();
+		});
 
 		JPanel actions = new JPanel(new GridLayout(1, 2, 4, 0));
 		actions.add(addButton);
@@ -106,13 +137,8 @@ public class Explorer extends JPanel {
 	}
 
 	private void syncModel() {
-		World current = Simulator.getInstance().getWorld();
-
-		List<Object> items = new ArrayList<>();
-		if (current != null) {
-			items.add(current);
-			items.addAll(current.getNodes());
-		}
+		Simulator sim = Simulator.getInstance();
+		List<Object> items = buildItems(sim.getWorlds().values());
 
 		if (sameItems(items)) {
 			return;
@@ -125,11 +151,30 @@ public class Explorer extends JPanel {
 			model.addElement(item);
 		}
 
+		World active = sim.getWorld();
+
 		if (selected != null && items.contains(selected)) {
 			list.setSelectedValue(selected, false);
+		} else if (active != null && items.contains(active)) {
+			list.setSelectedValue(active, false);
 		} else if (!items.isEmpty()) {
 			list.setSelectedIndex(0);
+		} else {
+			list.clearSelection();
 		}
+	}
+
+	static List<Object> buildItems(Collection<World> worlds) {
+		List<World> sorted = new ArrayList<>(worlds);
+		sorted.sort(Comparator.comparingInt(World::getId));
+
+		List<Object> items = new ArrayList<>();
+		for (World world : sorted) {
+			items.add(world);
+			items.addAll(world.getNodes());
+		}
+
+		return items;
 	}
 
 	private boolean sameItems(List<Object> items) {
@@ -150,22 +195,18 @@ public class Explorer extends JPanel {
 		World curr = Simulator.getInstance().getWorld();
 		Object sel = list.getSelectedValue();
 
-		String text = curr == null ? "Add World" : "Add Node";
-		if (!text.equals(addButton.getToolTipText())) {
-			addButton.setText(text);
-		}
-
+		updateAddMenu();
 		deleteButton.setEnabled(sel != null);
 
 		String target;
-		if (curr == null) {
-			target = "No World";
-		} else if (sel instanceof Node node && node.getWorld() != null) {
+		if (sel instanceof Node node && node.getWorld() != null) {
 			target = "Selected: Node #" + node.getId();
 		} else if (sel instanceof World world) {
 			target = "Selected: World #" + world.getId();
-		} else {
+		} else if (curr != null) {
 			target = "Selected none (World #" + curr.getId() + ")";
+		} else {
+			target = "No World";
 		}
 
 		if (!target.equals(targetLabel.getText())) {
@@ -173,57 +214,106 @@ public class Explorer extends JPanel {
 		}
 	}
 
-	private void add() {
+	private void updateAddMenu() {
+		addNodeItem.setVisible(parentWorld(list.getSelectedValue()) != null);
+	}
+
+	private void addWorld() {
 		Simulator sim = Simulator.getInstance();
-		World curr = sim.getWorld();
+		int id = nextWorldId(sim.getWorlds().values());
 
-		if (curr == null) {
-			int id = sim.getWorlds().keySet().stream()
-				.mapToInt(Integer::intValue)
-				.max()
-				.orElse(0) + 1;
-			
-				World created = new World(id, World.DEFAULT_TICK, World.DEFAULT_START, World.DEFAULT_END, World.DEFAULT_GRAVITY);
-				sim.setWorld(created);
+		World created = new World(id, World.DEFAULT_TICK, World.DEFAULT_START, World.DEFAULT_END, World.DEFAULT_GRAVITY);
+		sim.setWorld(created);
 
-				refresh();
-				select(created);
-				return;
+		refresh();
+		select(created);
+	}
+
+	private void addNode() {
+		World parent = parentWorld(list.getSelectedValue());
+		if (parent == null) {
+			return;
 		}
 
-		Object sel = list.getSelectedValue();
-		World parent = curr;
-
-		if (sel instanceof Node node && node.getWorld() != null) {
-			parent = node.getWorld();
-		}
-
-		int id = parent.getNodes().stream()
-			.mapToInt(Node::getId)
-			.max()
-			.orElse(0) + 1;
-		
-		Node node = new Node(id, World.DEFAULT_MASS);
+		Node node = new Node(nextNodeId(parent), World.DEFAULT_MASS);
 		node.setEquation(new MathFunction("0", "t"), Node.FunctionType.POSITION);
 		parent.addNode(node);
 
+		Simulator.getInstance().setWorld(parent);
 		refresh();
 		select(node);
 	}
 
 	private void delete() {
 		Object sel = list.getSelectedValue();
+		Simulator sim = Simulator.getInstance();
 
 		if (sel instanceof Node node) {
 			World parent = node.getWorld();
 			if (parent != null) {
 				parent.removeNode(node);
 			}
-		} else if (sel instanceof World world) {
-			Simulator.getInstance().removeWorld(world);
+
+			refresh();
+			if (parent != null) {
+				select(parent);
+			}
+			return;
+		}
+
+		if (sel instanceof World world) {
+			boolean active = sim.getWorld() == world;
+			sim.removeWorld(world);
+
+			if (active) {
+				World fallback = firstWorld(sim.getWorlds().values());
+				if (fallback != null) {
+					sim.setWorld(fallback);
+				}
+			}
+
+			refresh();
+
+			World fallback = sim.getWorld();
+			if (fallback != null) {
+				select(fallback);
+			}
+			return;
 		}
 
 		refresh();
+	}
+
+	public static World parentWorld(Object selected) {
+		if (selected instanceof Node node) {
+			return node.getWorld();
+		}
+
+		if (selected instanceof World world) {
+			return world;
+		}
+
+		return null;
+	}
+
+	public static int nextWorldId(Collection<World> worlds) {
+		return worlds.stream()
+			.mapToInt(World::getId)
+			.max()
+			.orElse(0) + 1;
+	}
+
+	public static int nextNodeId(World world) {
+		return world.getNodes().stream()
+			.mapToInt(Node::getId)
+			.max()
+			.orElse(0) + 1;
+	}
+
+	public static World firstWorld(Collection<World> worlds) {
+		return worlds.stream()
+			.min(Comparator.comparingInt(World::getId))
+			.orElse(null);
 	}
 
 	private boolean select(Object item) {
