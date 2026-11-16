@@ -18,9 +18,6 @@ import java.util.stream.Collectors;
 
 record Point(double x, double y) {}
 
-// TODO: Fix evaluation errors for equation
-// TODO: Eventually allow MathVariable[] to be passed into differentiate() and integrate() - also change calculate() to return the same function
-// TODO: Use BiFunction for above todo
 public class Equation {
 	public enum DifferentiationType {
 		LOWER,

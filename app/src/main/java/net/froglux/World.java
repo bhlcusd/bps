@@ -17,6 +17,7 @@ import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
+import java.util.concurrent.atomic.AtomicInteger;
 
 // Represents a workplace ("world") where nodes are constrained by the same timer and constants
 class World {
@@ -51,6 +52,9 @@ class World {
 
 	// Revision tracker
 	private int revision;
+
+	// Run sequence - only the newest run may publish results
+	private final AtomicInteger runSequence;
 	
 	public World(int id, double tick, double start, double end, double gravity) {
 		this.id = id;
@@ -59,6 +63,7 @@ class World {
 		this.end = end;
 		this.gravity = gravity;
 		this.revision = 0;
+		this.runSequence = new AtomicInteger();
 
 		this.yMin = DEFAULT_Y_MIN;
 		this.yMax = DEFAULT_Y_MAX;
@@ -70,9 +75,11 @@ class World {
 
 	// Generates complete values for all nodes for the given time period - each value will have (start - end) / tick values
 	public Report run() {
+		int sequence = runSequence.incrementAndGet();
 		List<Node> snapshot = List.copyOf(nodes);
 		List<Result> results = new ArrayList<>(snapshot.size());
 		List<String> errors = new ArrayList<>();
+		boolean interrupted = false;
 
 		try (ExecutorService pool = Executors.newFixedThreadPool(Simulator.SIMULATION_THREADS)) {
 			List<Future<Result>> futures = snapshot.stream()
@@ -85,13 +92,17 @@ class World {
 				} catch (ExecutionException e) {
 					errors.add("Node #" + snapshot.get(i).getId() + ": " + e.getCause().getMessage());
 				} catch (InterruptedException e) {
+					interrupted = true;
 					Thread.currentThread().interrupt();
 					break;
 				}
 			}
 		}
 
-		this.results = results;
+		if (!interrupted && sequence == runSequence.get()) {
+			this.results = results;
+		}
+
 		return new Report(results, errors);
 	}
 	

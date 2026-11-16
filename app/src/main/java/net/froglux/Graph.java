@@ -3,6 +3,7 @@ package net.froglux;
 import java.awt.BasicStroke;
 import java.awt.BorderLayout;
 import java.awt.Color;
+import java.awt.Cursor;
 import java.awt.Dimension;
 import java.awt.FlowLayout;
 import java.awt.FontMetrics;
@@ -11,6 +12,7 @@ import java.awt.Graphics2D;
 import java.awt.RenderingHints;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
+import java.awt.event.MouseWheelEvent;
 import java.awt.geom.Ellipse2D;
 import java.awt.geom.Line2D;
 import java.awt.geom.Path2D;
@@ -61,7 +63,10 @@ public class Graph extends JPanel {
 	private static final int PADDING_BOTTOM = 36;
 	private static final int PADDING_LEFT = 36;
 	private static final int PADDING_RIGHT = 16;
-	private static final GraphViewport DEFAULT_VIEWPORT = new GraphViewport(-10, 10, -10, 10, 1, 1);
+	public static final GraphViewport DEFAULT_VIEWPORT = new GraphViewport(-10, 10, -10, 10, 1, 1);
+	private static final double ZOOM_STEP = 1.1;
+	private static final double MIN_VIEWPORT_SPAN = 1e-9;
+	private static final double MAX_VIEWPORT_SPAN = 1e12;
 
 	// Misc. options
 	private static final int MAX_DECIMALS = 3;
@@ -82,9 +87,65 @@ public class Graph extends JPanel {
 	private List<GraphSeries> series = new ArrayList<>();
 	private double playheadTime = Double.NaN;
 
+	// Navigation
+	private double panStartX;
+	private double panStartY;
+	private GraphViewport panOrigin;
+
 	private Graph() {
 		setBackground(PANEL_BACKGROUND);
 		setOpaque(true);
+		setToolTipText("Drag to pan; scroll to zoom");
+
+		MouseAdapter navigation = new MouseAdapter() {
+			@Override
+			public void mousePressed(MouseEvent e) {
+				if (e.getButton() != MouseEvent.BUTTON1) {
+					return;
+				}
+
+				Rectangle2D plot = plotBounds();
+				if (plot == null || !plot.contains(e.getPoint())) {
+					return;
+				}
+
+				panStartX = e.getX();
+				panStartY = e.getY();
+				panOrigin = viewport;
+				setCursor(Cursor.getPredefinedCursor(Cursor.MOVE_CURSOR));
+			}
+
+			@Override
+			public void mouseDragged(MouseEvent e) {
+				if (panOrigin == null) {
+					return;
+				}
+
+				Rectangle2D plot = plotBounds();
+				if (plot == null) {
+					return;
+				}
+
+				double dx = (e.getX() - panStartX) / plot.getWidth() * panOrigin.width();
+				double dy = (e.getY() - panStartY) / plot.getHeight() * panOrigin.height();
+				GraphViewport moved = panViewport(panOrigin, dx, dy);
+
+				if (moved != null) {
+					setViewport(moved);
+					markManualView();
+				}
+			}
+
+			@Override
+			public void mouseReleased(MouseEvent e) {
+				panOrigin = null;
+				setCursor(Cursor.getDefaultCursor());
+			}
+		};
+
+		addMouseListener(navigation);
+		addMouseMotionListener(navigation);
+		addMouseWheelListener(this::zoom);
 	}
 
 	public static Graph getInstance() {
@@ -99,7 +160,6 @@ public class Graph extends JPanel {
 		repaint();
 	}
 
-	// TODO: Draw graph view with lines and plot points by getting processed points from world
 	public void paintComponent(Graphics g) {
 		super.paintComponent(g);
 
@@ -108,13 +168,11 @@ public class Graph extends JPanel {
 		g2d.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
 		g2d.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
 
-		int width = getWidth() - PADDING_LEFT - PADDING_RIGHT;
-		int height = getHeight() - PADDING_TOP - PADDING_BOTTOM;
-		if (width <= 1 || height <= 1) {
+		Rectangle2D.Double plot = plotBounds();
+		if (plot == null) {
 			return;
 		}
 
-		Rectangle2D.Double plot = new Rectangle2D.Double(PADDING_LEFT, PADDING_TOP, width, height);
 		double[] xTicks = tickValues(viewport.minX(), viewport.maxX(), viewport.xTick());
 		double[] yTicks = tickValues(viewport.minY(), viewport.maxY(), viewport.yTick());
 
@@ -333,6 +391,107 @@ public class Graph extends JPanel {
 
 	private double pixelY(double y, Rectangle2D plot) {
 		return plot.getMaxY() - (y - viewport.minY()) / viewport.height() * plot.getHeight();
+	}
+
+	private Rectangle2D.Double plotBounds() {
+		int width = getWidth() - PADDING_LEFT - PADDING_RIGHT;
+		int height = getHeight() - PADDING_TOP - PADDING_BOTTOM;
+
+		if (width <= 1 || height <= 1) {
+			return null;
+		}
+
+		return new Rectangle2D.Double(PADDING_LEFT, PADDING_TOP, width, height);
+	}
+
+	private void zoom(MouseWheelEvent e) {
+		Rectangle2D plot = plotBounds();
+
+		if (plot == null || !plot.contains(e.getPoint())) {
+			return;
+		}
+
+		double rotation = e.getPreciseWheelRotation();
+		if (!Double.isFinite(rotation) || rotation == 0) {
+			return;
+		}
+
+		double anchorX = viewport.minX() + (e.getX() - plot.getMinX()) / plot.getWidth() * viewport.width();
+		double anchorY = viewport.minY() + (plot.getMaxY() - e.getY()) / plot.getHeight() * viewport.height();
+		double factor = Math.pow(ZOOM_STEP, -rotation);
+		GraphViewport zoomed = zoomViewport(viewport, anchorX, anchorY, factor);
+
+		if (zoomed != null) {
+			setViewport(zoomed);
+			markManualView();
+		}
+
+		e.consume();
+	}
+
+	static GraphViewport panViewport(GraphViewport viewport, double dx, double dy) {
+		if (viewport == null || !Double.isFinite(dx) || !Double.isFinite(dy)) {
+			return null;
+		}
+
+		double minX = viewport.minX() - dx;
+		double maxX = viewport.maxX() - dx;
+		double minY = viewport.minY() + dy;
+		double maxY = viewport.maxY() + dy;
+
+		if (!validRange(minX, maxX) || !validRange(minY, maxY)) {
+			return null;
+		}
+
+		return viewport.withRange(minX, maxX, minY, maxY);
+	}
+
+	static GraphViewport zoomViewport(GraphViewport viewport, double anchorX, double anchorY, double factor) {
+		if (viewport == null || !Double.isFinite(anchorX) || !Double.isFinite(anchorY)
+			|| !Double.isFinite(factor) || factor <= 0) {
+			return null;
+		}
+
+		double width = clampSpan(viewport.width() * factor, anchorX);
+		double height = clampSpan(viewport.height() * factor, anchorY);
+
+		if (!Double.isFinite(width) || !Double.isFinite(height)) {
+			return null;
+		}
+
+		double ratioX = (anchorX - viewport.minX()) / viewport.width();
+		double ratioY = (viewport.maxY() - anchorY) / viewport.height();
+		double minX = anchorX - ratioX * width;
+		double maxX = minX + width;
+		double maxY = anchorY + ratioY * height;
+		double minY = maxY - height;
+
+		if (!validRange(minX, maxX) || !validRange(minY, maxY)) {
+			return null;
+		}
+
+		return new GraphViewport(minX, maxX, minY, maxY, niceTick(width), niceTick(height));
+	}
+
+	private static double clampSpan(double span, double anchor) {
+		if (!Double.isFinite(span) || span <= 0) {
+			return Double.NaN;
+		}
+
+		double min = Math.max(MIN_VIEWPORT_SPAN, Math.abs(anchor) * 1e-12);
+		return Math.clamp(span, min, MAX_VIEWPORT_SPAN);
+	}
+
+	private static boolean validRange(double min, double max) {
+		return Double.isFinite(min) && Double.isFinite(max) && min < max;
+	}
+
+	private void markManualView() {
+		World current = Simulator.getInstance().getWorld();
+
+		if (current != null) {
+			current.setAutoFit(false);
+		}
 	}
 
 	public void setPoints(Point... points) {
@@ -606,19 +765,25 @@ class Toolbar extends JPanel {
 	}
 
 	private static final int PLAYBACK_DELAY_MS = Math.max(1, 1000 / Simulator.TARGET_FRAME_RATE);
+	private static final int AUTO_RUN_DELAY_MS = 250;
 	private static final int TOOLBAR_HEIGHT = 48;
 	private static final int STATUS_WIDTH = 170;
 
 	private final JButton runButton;
 	private final JButton playButton;
 	private final JButton focusButton;
+	private final JButton homeButton;
 	private final Timeline timeline;
 	private final JLabel statusLabel;
 	private final Timer playbackTimer;
+	private final Timer autoRunTimer;
 
 	private State state;
 	private World world;
 	private long syncedRevision;
+	private long pendingRevision;
+	private long failedRevision;
+	private boolean autoRefreshArmed;
 	private double playhead;
 	private long lastTickNanos;
 	private SwingWorker<Report, Void> worker;
@@ -640,6 +805,9 @@ class Toolbar extends JPanel {
 		this.focusButton = new JButton("Focus");
 		focusButton.setEnabled(false);
 		focusButton.setToolTipText("Fit graph and re-enable automatic focus");
+		
+		this.homeButton = new JButton("Home");
+		homeButton.setToolTipText("Normalizes axis to the default view");
 
 		this.timeline = new Timeline();
 
@@ -653,6 +821,7 @@ class Toolbar extends JPanel {
 		JPanel info = new JPanel(new FlowLayout(FlowLayout.RIGHT, 4, 0));
 		info.add(statusLabel);
 		info.add(focusButton);
+		info.add(homeButton);
 
 		add(controls, BorderLayout.WEST);
 		add(timeline, BorderLayout.CENTER);
@@ -661,14 +830,22 @@ class Toolbar extends JPanel {
 		runButton.addActionListener(e -> run());
 		playButton.addActionListener(e -> togglePlayback());
 		focusButton.addActionListener(e -> focus());
+		homeButton.addActionListener(e -> home());
 		timeline.setListener(this::seek);
 
 		this.playbackTimer = new Timer(PLAYBACK_DELAY_MS, e -> tick());
 		playbackTimer.setCoalesce(true);
 
+		this.autoRunTimer = new Timer(AUTO_RUN_DELAY_MS, e -> startAutoRun());
+		autoRunTimer.setRepeats(false);
+		autoRunTimer.setCoalesce(true);
+
 		this.state = State.IDLE;
 		this.world = null;
 		this.syncedRevision = -1;
+		this.pendingRevision = -1;
+		this.failedRevision = -1;
+		this.autoRefreshArmed = false;
 		this.playhead = 0;
 	}
 
@@ -688,21 +865,48 @@ class Toolbar extends JPanel {
 			return;
 		}
 
-		if (state == State.RUNNING) {
-			if (current == null || current.getRevision() != syncedRevision) {
-				cancelRun();
-			} else {
-				updateControls();
-			}
+		if (current == null) {
+			updateControls();
 			return;
 		}
 
-		if (state == State.CURRENT && current != null && current.getRevision() != syncedRevision) {
-			invalidate("Out of date");
-		} else if (state == State.IDLE) {
-			if (current != null && current.getRevision() != syncedRevision) {
+		if (current.getNodes().isEmpty()) {
+			if (state != State.IDLE || !Graph.getInstance().getSeries().isEmpty()) {
+				cancelPendingRun();
+				state = State.IDLE;
 				syncedRevision = current.getRevision();
-				setStatus(current.getNodes().isEmpty() ? "No nodes" : "Ready");
+				failedRevision = -1;
+				Graph.getInstance().clearSeries();
+				Graph.getInstance().clearPlayhead();
+				playButton.setText("Play");
+				setStatus("No nodes");
+			}
+
+			updateControls();
+			return;
+		}
+
+		long revision = current.getRevision();
+
+		if (state == State.RUNNING) {
+			if (revision != pendingRevision) {
+				pendingRevision = revision;
+
+				if (worker != null) {
+					worker.cancel(true);
+				}
+			}
+
+			updateControls();
+			return;
+		}
+
+		if (revision != syncedRevision && revision != pendingRevision && revision != failedRevision) {
+			if (autoRefreshArmed) {
+				scheduleAutoRun(revision);
+			} else if (state == State.IDLE) {
+				syncedRevision = revision;
+				setStatus("Ready");
 			}
 		}
 
@@ -710,6 +914,49 @@ class Toolbar extends JPanel {
 	}
 
 	private void run() {
+		startRun(false);
+	}
+
+	private void scheduleAutoRun(long revision) {
+		if (!autoRefreshArmed || revision == syncedRevision || revision == failedRevision) {
+			return;
+		}
+
+		if (worker != null) {
+			pendingRevision = revision;
+			return;
+		}
+
+		pendingRevision = revision;
+		state = State.STALE;
+		setStatus("Updating...");
+		autoRunTimer.restart();
+		updateControls();
+	}
+
+	private void startAutoRun() {
+		autoRunTimer.stop();
+
+		World current = Simulator.getInstance().getWorld();
+		if (!autoRefreshArmed || current == null || current != world || current.getNodes().isEmpty()) {
+			return;
+		}
+
+		long revision = current.getRevision();
+		if (revision == syncedRevision || revision == failedRevision) {
+			pendingRevision = -1;
+			return;
+		}
+
+		if (worker != null) {
+			pendingRevision = revision;
+			return;
+		}
+
+		startRun(true);
+	}
+
+	private void startRun(boolean automatic) {
 		World target = Simulator.getInstance().getWorld();
 
 		if (target == null || target.getNodes().isEmpty()) {
@@ -717,20 +964,29 @@ class Toolbar extends JPanel {
 			return;
 		}
 
+		if (worker != null) {
+			pendingRevision = target.getRevision();
+			return;
+		}
+
+		long revision = target.getRevision();
+
+		if (!automatic) {
+			autoRefreshArmed = true;
+			failedRevision = -1;
+			autoRunTimer.stop();
+		}
+
 		stopPlayback();
 
 		state = State.RUNNING;
 		world = target;
-		syncedRevision = target.getRevision();
-
-		Graph graph = Graph.getInstance();
-		graph.clearSeries();
-		graph.clearPlayhead();
+		pendingRevision = revision;
 
 		timeline.setEnabled(false);
 		playButton.setEnabled(false);
 		runButton.setEnabled(false);
-		setStatus("Running...");
+		setStatus(automatic ? "Updating..." : "Running...");
 
 		worker = new SwingWorker<Report, Void>() {
 			@Override
@@ -740,29 +996,60 @@ class Toolbar extends JPanel {
 
 			@Override
 			protected void done() {
-				if (isCancelled()) {
-					return;
-				}
-
 				try {
+					if (isCancelled()) {
+						return;
+					}
+
 					Report report = get();
 
-					if (Simulator.getInstance().getWorld() != target || target.getRevision() != syncedRevision) {
-						invalidate("Out of date");
+					if (Simulator.getInstance().getWorld() != target || target.getRevision() != revision) {
 						return;
 					}
 
 					display(report, target);
 				} catch (Exception e) {
-					String message = e.getMessage();
-					invalidate(message == null ? "Run failed" : "Run failed: " + message);
+					if (!isCancelled()) {
+						failRun(revision, e);
+					}
 				} finally {
-					worker = null;
+					if (worker == this) {
+						worker = null;
+						finishRun(target);
+					}
 				}
 			}
 		};
 
 		worker.execute();
+	}
+
+	private void failRun(long revision, Exception e) {
+		failedRevision = revision;
+		pendingRevision = -1;
+		state = State.STALE;
+
+		String message = e.getMessage();
+		setStatus(message == null ? "Update failed" : "Update failed: " + message);
+	}
+
+	private void finishRun(World target) {
+		World current = Simulator.getInstance().getWorld();
+
+		if (current != target) {
+			reset(current);
+			return;
+		}
+
+		if (current != null && !current.getNodes().isEmpty() && autoRefreshArmed) {
+			long revision = current.getRevision();
+
+			if (revision != syncedRevision && revision != failedRevision) {
+				scheduleAutoRun(revision);
+			}
+		}
+
+		updateControls();
 	}
 
 	private void display(Report report, World target) {
@@ -800,32 +1087,35 @@ class Toolbar extends JPanel {
 		Graph graph = Graph.getInstance();
 		double start = target.getStart();
 		double end = target.getEnd();
+		double previousPlayhead = playhead;
+		boolean hasData = !plotted.isEmpty();
 
-		if (plotted.isEmpty()) {
-			graph.clearSeries();
-			graph.clearPlayhead();
-		} else {
+		if (hasData) {
 			graph.setSeries(plotted);
 			graph.setConnectPoints(true);
 
 			if (target.isAutoFit()) {
 				graph.autoFit();
-			} else {
-				graph.setYRange(target.getYMin(), target.getYMax());
 			}
-
-			playhead = start;
-			applyPlayhead();
+		} else {
+			graph.clearSeries();
+			graph.clearPlayhead();
 		}
 
 		timeline.setRange(start, end);
-		timeline.setTime(start);
-		timeline.setEnabled(!plotted.isEmpty() && end > start);
-		playButton.setText("Play");
-		playButton.setEnabled(!plotted.isEmpty() && end > start);
 
-		state = plotted.isEmpty() ? State.IDLE : State.CURRENT;
+		playhead = Math.clamp(previousPlayhead, start, end);
+		timeline.setTime(playhead);
+		applyPlayhead();
+
+		timeline.setEnabled(hasData && end > start);
+		playButton.setText("Play");
+		playButton.setEnabled(hasData && end > start);
+
+		state = hasData ? State.CURRENT : State.IDLE;
 		syncedRevision = target.getRevision();
+		pendingRevision = -1;
+		failedRevision = -1;
 
 		String summary = plotted.isEmpty() ? "No plottable data" : "Done: " + plotted.size() + " node" + (plotted.size() == 1 ? "" : "s");
 
@@ -842,40 +1132,27 @@ class Toolbar extends JPanel {
 		updateControls();
 	}
 
-	private void invalidate(String message) {
-		stopPlayback();
+	private void cancelPendingRun() {
+		autoRunTimer.stop();
 
 		if (worker != null) {
 			worker.cancel(true);
 			worker = null;
 		}
 
-		world = Simulator.getInstance().getWorld();
-		state = State.STALE;
-		syncedRevision = world == null ? -1 : world.getRevision();
-
-		Graph.getInstance().clearSeries();
-		Graph.getInstance().clearPlayhead();
-
-		timeline.setEnabled(false);
-		playButton.setEnabled(false);
-		playButton.setText("Play");
-		setStatus(message);
-		updateControls();
+		pendingRevision = -1;
 	}
 
 	private void reset(World current) {
 		stopPlayback();
-
-		if (worker != null) {
-			worker.cancel(true);
-			worker = null;
-		}
+		cancelPendingRun();
 
 		world = current;
 		state = State.IDLE;
 		syncedRevision = current == null ? -1 : current.getRevision();
-		playhead = 0;
+		failedRevision = -1;
+		autoRefreshArmed = false;
+		playhead = current == null ? 0 : current.getStart();
 
 		Graph.getInstance().clearSeries();
 		Graph.getInstance().clearPlayhead();
@@ -900,15 +1177,6 @@ class Toolbar extends JPanel {
 		updateControls();
 	}
 
-	private void cancelRun() {
-		if (worker != null) {
-			worker.cancel(true);
-			worker = null;
-		}
-
-		invalidate("Out of date");
-	}
-
 	private void updateControls() {
 		boolean hasNodes = world != null && !world.getNodes().isEmpty();
 		boolean current = state == State.CURRENT;
@@ -928,6 +1196,10 @@ class Toolbar extends JPanel {
 		}
 
 		Graph.getInstance().autoFit();
+	}
+
+	private void home() {
+		Graph.getInstance().setViewport(Graph.DEFAULT_VIEWPORT);
 	}
 
 	private void togglePlayback() {

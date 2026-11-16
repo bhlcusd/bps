@@ -338,19 +338,19 @@ class Inspector extends JPanel {
 	}
 
 	private void buildWorld(World world) {
-		addReadOnly("id", () -> String.valueOf(world.getId()));
-		addNumber("start", world::getStart, world::setStart);
-		addNumber("end", world::getEnd, world::setEnd);
-		addNumber("tick", world::getTick, world::setTick);
-		addNumber("gravity", world::getGravity, val -> {
+		addReadOnly("Id", () -> String.valueOf(world.getId()));
+		addNumber("Start", world::getStart, world::setStart);
+		addNumber("End", world::getEnd, world::setEnd);
+		addNumber("Tick", world::getTick, world::setTick);
+		addNumber("Gravity", world::getGravity, val -> {
 			world.setGravity(val);
 			return true;
 		});
-		addNumber("y min", world::getYMin, val -> setYRange(world, val, world.getYMax()));
-		addNumber("y max", world::getYMax, val -> setYRange(world, world.getYMin(), val));
-		addReadOnly("auto focus", () -> world.isAutoFit() ? "on" : "manual");
-		addReadOnly("time", () -> format(world.getTime()));
-		addReadOnly("nodes", () -> String.valueOf(world.getNodes().size()));
+		addNumber("Min Y", world::getYMin, val -> setYRange(world, val, world.getYMax()));
+		addNumber("Max Y", world::getYMax, val -> setYRange(world, world.getYMin(), val));
+		addReadOnly("Autofocus", () -> world.isAutoFit() ? "On" : "Manual");
+		addReadOnly("Time", () -> format(world.getTime()));
+		addReadOnly("Nodes", () -> String.valueOf(world.getNodes().size()));
 	}
 
 	private static boolean setYRange(World world, double min, double max) {
@@ -363,15 +363,15 @@ class Inspector extends JPanel {
 	}
 
 	private void buildNode(Node node) {
-		addReadOnly("id", () -> String.valueOf(node.getId()));
-		addReadOnly("world id", () -> node.getWorld() == null ? "none" : String.valueOf(node.getWorld().getId()));
+		addReadOnly("Id", () -> String.valueOf(node.getId()));
+		addReadOnly("World Id", () -> node.getWorld() == null ? "None" : String.valueOf(node.getWorld().getId()));
 		addColor(node);
-		addNumber("mass", node::getMass, node::setMass);
+		addNumber("Mass", node::getMass, node::setMass);
 		addType(node);
 		addEquation(node);
-		addReadOnly("x", () -> format(valueAt(node, "x")));
-		addReadOnly("v", () -> format(valueAt(node, "v")));
-		addReadOnly("a", () -> format(valueAt(node, "a")));
+		addReadOnly("Position", () -> format(valueAt(node, "x")));
+		addReadOnly("Velocity", () -> format(valueAt(node, "v")));
+		addReadOnly("Acceleration", () -> format(valueAt(node, "a")));
 	}
 
 	private void addColor(Node node) {
@@ -384,7 +384,7 @@ class Inspector extends JPanel {
 		holder.setOpaque(false);
 		holder.add(swatch, BorderLayout.CENTER);
 
-		addRow("color", holder);
+		addRow("Color", holder);
 	}
 
 	private void addNumber(String name, DoubleSupplier getter, DoublePredicate setter) {
@@ -424,7 +424,7 @@ class Inspector extends JPanel {
 		JComboBox<Node.FunctionType> combo = new JComboBox<>(Node.FunctionType.values());
 		combo.setSelectedItem(node.getType());
 		combo.addActionListener(e -> node.setEquation(node.getEquation(), (Node.FunctionType) combo.getSelectedItem()));
-		addRow("type", combo);
+		addRow("Equation Type", combo);
 	}
 
 	private void addEquation(Node node) {
@@ -438,7 +438,7 @@ class Inspector extends JPanel {
 				if (text.isEmpty()) {
 					node.setEquation(null, null);
 				} else {
-					MathFunction eq = new MathFunction(text, "t"); // TODO: Change depending on what function type it is
+					MathFunction eq = new MathFunction(text, "t");
 					eq.calculate(node.getVariables(0)); // Validate expr
 					node.setEquation(eq, node.getType());
 				}
@@ -452,7 +452,7 @@ class Inspector extends JPanel {
 		};
 
 		bindCommit(field, commit);
-		addRow("equation", field);
+		addRow("Equation", field);
 	}
 
 	private void bindCommit(JTextField field, Runnable commit) {
@@ -468,22 +468,23 @@ class Inspector extends JPanel {
 	private void addRow(String name, JComponent component) {
 		JLabel label = new JLabel(name + ":");
 		label.setVerticalAlignment(SwingConstants.CENTER);
+		label.setFont(label.getFont().deriveFont(14.0f));
 		form.add(label);
 		form.add(component);
 	}
 
 	private void updateLiveValues() {
 		if (target instanceof World world) {
-			setLive("id", String.valueOf(world.getId()));
-			setLive("auto focus", world.isAutoFit() ? "on" : "manual");
-			setLive("time", format(world.getTime()));
-			setLive("nodes", String.valueOf(world.getNodes().size()));
+			setLive("Id", String.valueOf(world.getId()));
+			setLive("Autofocus", world.isAutoFit() ? "On" : "Manual");
+			setLive("Time", format(world.getTime()));
+			setLive("Nodes", String.valueOf(world.getNodes().size()));
 		} else if (target instanceof Node node) {
-			setLive("id", String.valueOf(node.getId()));
-			setLive("world", node.getWorld() == null ? "none" : "#" + node.getWorld().getId());
-			setLive("x", format(valueAt(node, "x")));
-			setLive("v", format(valueAt(node, "v")));
-			setLive("a", format(valueAt(node, "a")));
+			setLive("Id", String.valueOf(node.getId()));
+			setLive("World", node.getWorld() == null ? "None" : "#" + node.getWorld().getId());
+			setLive("Position", format(valueAt(node, "x")));
+			setLive("Velocity", format(valueAt(node, "v")));
+			setLive("Acceleration", format(valueAt(node, "a")));
 		}
 	}
 
