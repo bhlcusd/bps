@@ -6,6 +6,26 @@ import static org.junit.jupiter.api.Assertions.*;
 
 class GraphViewportTest {
 	@Test
+	void defaultViewportMatchesInitialGraphBounds() {
+		assertEquals(-10, Graph.DEFAULT_VIEWPORT.minX(), 1e-9);
+		assertEquals(10, Graph.DEFAULT_VIEWPORT.maxX(), 1e-9);
+		assertEquals(-10, Graph.DEFAULT_VIEWPORT.minY(), 1e-9);
+		assertEquals(10, Graph.DEFAULT_VIEWPORT.maxY(), 1e-9);
+		assertEquals(1, Graph.DEFAULT_VIEWPORT.xTick(), 1e-9);
+		assertEquals(1, Graph.DEFAULT_VIEWPORT.yTick(), 1e-9);
+	}
+
+	@Test
+	void naturalScrollReversesWheelZoomDirection() {
+		double natural = Graph.zoomFactor(1, true);
+		double traditional = Graph.zoomFactor(1, false);
+
+		assertTrue(natural < 1);
+		assertTrue(traditional > 1);
+		assertEquals(1, natural * traditional, 1e-9);
+	}
+
+	@Test
 	void panShiftsRangesByDataDelta() {
 		GraphViewport viewport = new GraphViewport(0, 10, -5, 5, 1, 1);
 		GraphViewport moved = Graph.panViewport(viewport, 2, 3);

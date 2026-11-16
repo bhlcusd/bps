@@ -349,8 +349,31 @@ class Inspector extends JPanel {
 		addNumber("Min Y", world::getYMin, val -> setYRange(world, val, world.getYMax()));
 		addNumber("Max Y", world::getYMax, val -> setYRange(world, world.getYMin(), val));
 		addReadOnly("Autofocus", () -> world.isAutoFit() ? "On" : "Manual");
+		addScrollMode(world);
 		addReadOnly("Time", () -> format(world.getTime()));
 		addReadOnly("Nodes", () -> String.valueOf(world.getNodes().size()));
+	}
+
+	private void addScrollMode(World world) {
+		JComboBox<World.ScrollMode> combo = new JComboBox<>(World.ScrollMode.values());
+		combo.setSelectedItem(world.getScrollMode());
+		combo.addActionListener(e -> {
+			world.setScrollMode((World.ScrollMode) combo.getSelectedItem());
+			updateScrollTooltip(combo, world);
+		});
+
+		updateScrollTooltip(combo, world);
+		addRow("Scroll Mode", combo);
+	}
+
+	private static void updateScrollTooltip(JComboBox<World.ScrollMode> combo, World world) {
+		String tooltip = switch (world.getScrollMode()) {
+			case SYSTEM -> "Using OS setting: " + (ScrollSettings.systemNatural() ? "Natural" : "Traditional");
+			case NATURAL -> "Scroll down to zoom in";
+			case TRADITIONAL -> "Scroll up to zoom in";
+		};
+
+		combo.setToolTipText(tooltip);
 	}
 
 	private static boolean setYRange(World world, double min, double max) {

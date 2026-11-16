@@ -418,7 +418,7 @@ public class Graph extends JPanel {
 
 		double anchorX = viewport.minX() + (e.getX() - plot.getMinX()) / plot.getWidth() * viewport.width();
 		double anchorY = viewport.minY() + (plot.getMaxY() - e.getY()) / plot.getHeight() * viewport.height();
-		double factor = Math.pow(ZOOM_STEP, -rotation);
+		double factor = zoomFactor(rotation, usesNaturalScroll());
 		GraphViewport zoomed = zoomViewport(viewport, anchorX, anchorY, factor);
 
 		if (zoomed != null) {
@@ -427,6 +427,17 @@ public class Graph extends JPanel {
 		}
 
 		e.consume();
+	}
+
+	private static boolean usesNaturalScroll() {
+		World world = Simulator.getInstance().getWorld();
+		World.ScrollMode mode = world == null ? World.ScrollMode.SYSTEM : world.getScrollMode();
+
+		return mode.isNatural(ScrollSettings.systemNatural());
+	}
+
+	static double zoomFactor(double rotation, boolean natural) {
+		return Math.pow(ZOOM_STEP, natural ? -rotation : rotation);
 	}
 
 	static GraphViewport panViewport(GraphViewport viewport, double dx, double dy) {

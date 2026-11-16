@@ -143,7 +143,7 @@ public class Simulator implements ActionListener, KeyListener {
 	public void run() {
 		Graph graph = Graph.getInstance();
 
-		graph.setViewport(0, 10, -5, 5, 1, 1);
+		graph.setViewport(Graph.DEFAULT_VIEWPORT);
 		graph.setShowGrid(true);
 		graph.setConnectPoints(true);
 		graph.clearSeries();

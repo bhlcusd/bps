@@ -12,6 +12,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.concurrent.Callable;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
@@ -21,6 +22,31 @@ import java.util.concurrent.atomic.AtomicInteger;
 
 // Represents a workplace ("world") where nodes are constrained by the same timer and constants
 class World {
+	public enum ScrollMode {
+		SYSTEM("System"),
+		NATURAL("Natural"),
+		TRADITIONAL("Traditional");
+
+		private final String label;
+
+		ScrollMode(String label) {
+			this.label = label;
+		}
+
+		@Override
+		public String toString() {
+			return label;
+		}
+
+		boolean isNatural(boolean systemNatural) {
+			return switch (this) {
+				case SYSTEM -> systemNatural;
+				case NATURAL -> true;
+				case TRADITIONAL -> false;
+			};
+		}
+	}
+
 	public static final double DEFAULT_TICK = 0.01;
 	public static final double DEFAULT_START = 0;
 	public static final double DEFAULT_END = 10;
@@ -43,6 +69,7 @@ class World {
 	// Graph view
 	private double yMin, yMax;
 	private boolean autoFit;
+	private ScrollMode scrollMode = ScrollMode.SYSTEM;
 
 	// Nodes
 	private List<Node> nodes;
@@ -206,6 +233,14 @@ class World {
 
 	public double getGravity() {
 		return gravity;
+	}
+
+	public ScrollMode getScrollMode() {
+		return scrollMode;
+	}
+
+	public void setScrollMode(ScrollMode scrollMode) {
+		this.scrollMode = Objects.requireNonNull(scrollMode);
 	}
 
 	public boolean setYRange(double yMin, double yMax) {

@@ -58,4 +58,20 @@ public class WorldTest {
 		world.run();
 		assertNotNull(world.getResult(node));
 	}
+
+	@Test
+	void scrollModeDefaultsToSystemWithoutChangingRevision() {
+		World world = new World(1, 0.01, 0, 10, -9.81);
+		int revision = world.getRevision();
+
+		assertEquals(World.ScrollMode.SYSTEM, world.getScrollMode());
+		assertTrue(World.ScrollMode.SYSTEM.isNatural(true));
+		assertFalse(World.ScrollMode.SYSTEM.isNatural(false));
+		assertTrue(World.ScrollMode.NATURAL.isNatural(false));
+		assertFalse(World.ScrollMode.TRADITIONAL.isNatural(true));
+
+		world.setScrollMode(World.ScrollMode.TRADITIONAL);
+		assertEquals(World.ScrollMode.TRADITIONAL, world.getScrollMode());
+		assertEquals(revision, world.getRevision());
+	}
 }
