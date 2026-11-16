@@ -23,13 +23,15 @@
 	3. Launch and enjoy bps!
 
 ## Features
-
+ - [Explorer](./app/src/main/java/net/froglux/Explorer.java): Select or create a world or node; selecting a world or node will highlight its info inside the Inspector
+ - [Inspector](./app/src/main/java/net/froglux/Explorer.java): Reveal a world's or node's values; worlds and nodes have different properties
+ - [Graph](./app/src/main/java/net/froglux/Graph.java): A zoomable and panable graph that plots points with axes and labels
+ - [Toolbar](./app/src/main/java/net/froglux/Graph.java): A simple toolbar that contains buttons to run the world/nodes, play/pause a simulation, or focus on the graph or return to the default "home" view
 
 ## Technicals
-
-
-## Acknowledgements
-
+ * Mostly native Java: The only dependencies used are for testing, but are not required for development of the program. The entire program is written in pure Java and Swing, so there is technically no need for Gradle, but it helps with building and testing functions.
+ * Relatively fast: [Equation](./app/src/main/java/net/froglux/Equation.java) contains many convenience methods for parsing text equations. It uses a two stack system to parse operands and operators together. There are also methods that help with integration and differentiation. The functions can be converted into Java DoubleUnaryOperator and DoubleBinaryOperator, both of which are versions of the built-in Java Function<> class. This allows functions to essentially input their own t-value and extract the value quickly.
+ * Simple GUI: The GUI, although dated by its look and feel, is quite simple. The Inspector was modeled after Godot's inspector, with a simple two column approach that shows object information in a concise manner. The Graph is also quite intuitive, with optional natural scrolling enabled by default (depending on system configuration) for macOS.
 
 ## License
 bps is licensed under the [GNU General Public License Version 3](./LICENSE).
